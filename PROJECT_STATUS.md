@@ -6,10 +6,10 @@ Status captured: 2026-08-14
 
 AdminFlow is at a clean feature boundary with AI document classification implemented on top of the native PDF and selective OCR foundation.
 
-Current feature PR:
+Last feature merge:
 
-- PR #6 — `Add AI document classification`
-- feature commit `f512e393eb10c1d83f6e2cf6194172268354301f`
+- PR #6 — `Add AI document classification` — merged to `main`
+- merge commit `117afaa3d221f3594bb0f818605bf14768714c46`
 - GitHub Actions: passed, including PostgreSQL migrations through `20260814_0006` and the full pytest suite
 
 Estimated V1 completion: **~46%**.
