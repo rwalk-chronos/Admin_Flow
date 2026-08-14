@@ -1,7 +1,9 @@
 import logging
+from collections.abc import Generator
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
 
@@ -16,6 +18,11 @@ def get_engine() -> Engine:
     if _engine is None:
         _engine = create_engine(get_settings().database_url, pool_pre_ping=True)
     return _engine
+
+
+def get_session() -> Generator[Session, None, None]:
+    with Session(get_engine()) as session:
+        yield session
 
 
 def database_is_ready() -> bool:
