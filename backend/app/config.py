@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     ocr_language: str = "eng"
     ocr_dpi: int = Field(default=300, gt=0)
     ocr_timeout_seconds: int = Field(default=30, gt=0)
+    openai_api_key: SecretStr | None = None
+    ai_classification_model: str = "gpt-5-mini"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

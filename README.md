@@ -2,18 +2,18 @@
 
 AdminFlow is a local-first administrative workflow engine. It is designed to turn incoming unstructured information into structured, reviewable work items while keeping workflow state and business rules deterministic.
 
-> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, and the initial domain-neutral intake event and artifact foundations. It is not a production-ready AdminFlow application and does not yet contain workflow behavior.
+> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral intake/artifact foundations, native PDF extraction, selective OCR, and AI document classification. It is not a production-ready AdminFlow application and does not yet contain workflow behavior.
 
 ## Architecture
 
 - **Backend:** Python 3.12 and FastAPI
 - **Database:** PostgreSQL 16 through SQLAlchemy and psycopg
 - **Migrations:** Alembic
-- **AI layer:** replaceable local AI provider, to be added after the core engine
+- **AI layer:** replaceable provider behind a narrow structured-data interface
 - **Workflow control:** deterministic application code
 - **Local deployment:** Docker Compose on Linux
 
-AI will interpret messy information. Deterministic code will validate data, control workflow state, create actions, and record history. Humans will review work when the workflow requires approval.
+AI interprets messy information. Deterministic code validates data, controls workflow state, creates actions, and records history. Humans will review work when the workflow requires approval.
 
 ## Prerequisites
 
@@ -121,7 +121,7 @@ The PostgreSQL integration test is skipped by default. To run it against the Com
 ADMINFLOW_RUN_DATABASE_INTEGRATION_TESTS=1 pytest -m integration
 ```
 
-`DATABASE_URL` may be set to test another database. GitHub Actions starts a dedicated PostgreSQL service and enables the integration test automatically.
+`DATABASE_URL` may be set to test another database. GitHub Actions starts a dedicated PostgreSQL service and enables the integration test automatically. AI classification tests inject a stub classifier and do not make external model calls.
 
 ## Database migrations
 
@@ -168,9 +168,7 @@ In Docker Compose, the backend uses `/data/artifacts`. The named `adminflow_arti
 
 AdminFlow can deterministically extract native text from PDF IntakeArtifacts with pypdf. Each extraction preserves 1-based page boundaries, character counts, and whether each page lacks meaningful native text and will require OCR later. Password-protected and corrupt PDFs produce persisted diagnostic extraction statuses without modifying the original artifact.
 
-When native extraction marks pages as requiring OCR, the selective OCR endpoint
-rasterizes only those pages at 300 DPI and runs Tesseract. Native page text is
-preserved exactly in a new immutable derived extraction:
+When native extraction marks pages as requiring OCR, the selective OCR endpoint rasterizes only those pages at 300 DPI and runs Tesseract. Native page text is preserved exactly in a new immutable derived extraction:
 
 ```text
 native PDF text extraction
@@ -178,6 +176,48 @@ native PDF text extraction
 selective OCR only for pages requiring it
 ```
 
-OCR defaults can be overridden with `OCR_LANGUAGE`, `OCR_DPI`, and
-`OCR_TIMEOUT_SECONDS`. The current foundation supports English PDF OCR only; it
-does not classify documents or interpret extracted text.
+OCR defaults can be overridden with `OCR_LANGUAGE`, `OCR_DPI`, and `OCR_TIMEOUT_SECONDS`. The current foundation supports English PDF OCR.
+
+## AI document classification
+
+Readable `DocumentExtraction` text can be classified into an application-supplied candidate taxonomy. The taxonomy is sent with each request so the core engine does not hard-code industry-specific document types.
+
+The first provider adapter uses the OpenAI Responses API with structured output. Configure it in `backend/.env` or the shell:
+
+```dotenv
+OPENAI_API_KEY=your-key-here
+AI_CLASSIFICATION_MODEL=gpt-5-mini
+```
+
+If `OPENAI_API_KEY` is not configured, classification requests return HTTP 503. Extraction, OCR, health, and storage endpoints continue to operate normally.
+
+Classify a readable extraction:
+
+```bash
+curl -X POST \
+  http://localhost:8000/document-extractions/EXTRACTION_ID/classifications \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "candidate_labels": [
+      {
+        "name": "procedure",
+        "description": "Step-by-step instructions for performing a task"
+      },
+      {
+        "name": "invoice",
+        "description": "A request for payment for goods or services"
+      }
+    ]
+  }'
+```
+
+The result is persisted as an immutable `DocumentClassification` with:
+
+- source `document_extraction_id`
+- the exact candidate-label snapshot
+- provider, model, and prompt version
+- selected label
+- confidence from 0 to 1
+- concise classification rationale
+
+Classification does not transition workflow state or trigger actions. Those responsibilities remain in deterministic application logic and are intentionally outside this feature slice.

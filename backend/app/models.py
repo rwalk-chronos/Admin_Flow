@@ -8,6 +8,7 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     String,
     Text,
@@ -171,4 +172,42 @@ class DocumentExtraction(Base):
     derived_extractions: Mapped[list["DocumentExtraction"]] = relationship(
         back_populates="source_extraction",
         foreign_keys=[source_extraction_id],
+    )
+    classifications: Mapped[list["DocumentClassification"]] = relationship(
+        back_populates="document_extraction"
+    )
+
+
+class DocumentClassification(Base):
+    __tablename__ = "document_classifications"
+    __table_args__ = (
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_document_classifications_confidence",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    document_extraction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_extractions.id"),
+        nullable=False,
+        index=True,
+    )
+    candidate_labels: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    provider_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    document_extraction: Mapped[DocumentExtraction] = relationship(
+        back_populates="classifications"
     )
