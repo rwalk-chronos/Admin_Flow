@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from app.models import DocumentExtractionStatus, IntakeEventStatus
 
@@ -75,4 +75,43 @@ class DocumentExtractionResponse(BaseModel):
     text_content: str | None
     page_results: list[DocumentPageResult | OcrDocumentPageResult]
     error_message: str | None
+    created_at: datetime
+
+
+class ClassificationCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class DocumentClassificationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_labels: list[ClassificationCandidate] = Field(
+        min_length=2, max_length=50
+    )
+
+    @model_validator(mode="after")
+    def candidate_names_are_unique(self) -> "DocumentClassificationCreate":
+        normalized_names = [
+            candidate.name.strip().casefold() for candidate in self.candidate_labels
+        ]
+        if len(normalized_names) != len(set(normalized_names)):
+            raise ValueError("candidate label names must be unique")
+        return self
+
+
+class DocumentClassificationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    document_extraction_id: uuid.UUID
+    candidate_labels: list[ClassificationCandidate]
+    provider_name: str
+    model_name: str
+    prompt_version: str
+    label: str
+    confidence: float
+    rationale: str
     created_at: datetime

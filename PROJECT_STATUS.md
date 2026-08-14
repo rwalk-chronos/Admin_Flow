@@ -4,15 +4,17 @@ Status captured: 2026-08-14
 
 ## Current state
 
-AdminFlow is at a clean feature boundary after the selective PDF OCR foundation was merged to `main`.
+AdminFlow is at a clean feature boundary with AI document classification implemented on top of the native PDF and selective OCR foundation.
 
-Last feature merge before this status file:
+Current feature PR:
 
-- `85aa8a1b6f271f7c61db9b1015d3334c532601aa` — `Add selective PDF OCR (#5)`
+- PR #6 — `Add AI document classification`
+- feature commit `f512e393eb10c1d83f6e2cf6194172268354301f`
+- GitHub Actions: passed, including PostgreSQL migrations through `20260814_0006` and the full pytest suite
 
-Estimated V1 completion: **~36%**.
+Estimated V1 completion: **~46%**.
 
-**Next: AI document classification.**
+**Next: AI structured data extraction.**
 
 ## Product architecture
 
@@ -49,6 +51,12 @@ page text       pypdfium2
             DocumentExtraction
                     ↓
           source_extraction_id lineage
+                    ↓
+         AI document classifier
+                    ↓
+       validated structured result
+                    ↓
+        DocumentClassification
 ```
 
 ### Backend
@@ -68,6 +76,8 @@ page text       pypdfium2
 - Original source artifacts remain immutable.
 - Derived extraction records are immutable.
 - Derived OCR extractions retain lineage through `source_extraction_id`.
+- Document classifications are immutable and retain direct lineage to the `DocumentExtraction` that was classified.
+- Each classification stores the exact candidate taxonomy plus provider, model, and prompt-version metadata used to produce it.
 
 ### Native document reader
 
@@ -93,6 +103,21 @@ page text       pypdfium2
 - Tesseract is invoked with a subprocess argument list and without `shell=True`.
 - Temporary raster images are automatically cleaned up.
 - OCR language, DPI, and timeout are configurable.
+
+### AI document classification
+
+- Classification consumes readable `DocumentExtraction.text_content` without modifying the extraction.
+- The application supplies a candidate-label taxonomy with each classification request; the core engine does not hard-code industry-specific document types.
+- Candidate label names are validated as unique before the AI provider is called.
+- The AI provider is hidden behind a narrow `DocumentClassifier` interface.
+- The first provider adapter uses the OpenAI Responses API with structured output.
+- Document text is explicitly treated as untrusted data rather than instructions.
+- AI output is validated before persistence.
+- The selected label must exactly match one label in the application-supplied taxonomy.
+- Confidence must be between 0 and 1.
+- Provider failures return a sanitized API error and do not persist a classification.
+- Missing AI configuration affects only classification requests; the deterministic intake/extraction/OCR foundation remains usable.
+- Classification does not transition workflow state or trigger actions.
 
 ### API / domain objects implemented
 
@@ -127,6 +152,24 @@ Implemented deterministic statuses include:
 - `password_required`
 - `failed`
 
+#### DocumentClassification
+
+Represents one immutable classification of a readable `DocumentExtraction`.
+
+Persisted fields include:
+
+- source `document_extraction_id`
+- exact candidate-label taxonomy snapshot
+- provider name
+- model name
+- prompt version
+- selected label
+- confidence
+- concise rationale
+- timestamp
+
+Implemented API operations include create, list-by-extraction, and get-by-ID.
+
 ## Infrastructure and development environment
 
 - Docker Compose development environment
@@ -137,7 +180,7 @@ Implemented deterministic statuses include:
 - PostgreSQL health endpoint
 - GitHub Actions CI
 - pytest test suite
-- Alembic migration chain through `20260814_0005`
+- Alembic migration chain through `20260814_0006`
 
 The local development stack has been run successfully on Ubuntu Linux.
 
@@ -178,7 +221,19 @@ The local development stack has been run successfully on Ubuntu Linux.
    - extraction lineage
    - Docker and CI Tesseract installation
 
+6. **AI document classification**
+   - domain-neutral candidate taxonomy supplied per request
+   - replaceable classifier interface
+   - OpenAI structured-output adapter
+   - deterministic validation of provider output
+   - immutable `DocumentClassification` persistence and extraction lineage
+   - create/list/get classification API
+   - provider/model/prompt metadata retained
+   - no workflow-state or action behavior added
+
 ## Verification and test results
+
+### Selective OCR baseline
 
 Selective OCR was validated locally in Docker with the real Tesseract binary and PostgreSQL integration enabled:
 
@@ -195,6 +250,21 @@ GitHub Actions also passed after PR #5 was opened. The CI job successfully compl
 - backend/test dependency installation
 - Alembic migrations through `0005`
 - full test run
+
+### AI document classification
+
+PR #6 was validated by GitHub Actions on feature commit `f512e393eb10c1d83f6e2cf6194172268354301f`.
+
+The CI job successfully completed:
+
+- PostgreSQL service initialization
+- Python 3.12 setup
+- Tesseract dependency installation
+- backend/test dependency installation including the OpenAI SDK
+- Alembic migration through `20260814_0006`
+- full pytest suite, including classification unit tests and PostgreSQL classification integration tests
+
+Classification tests use injected stub/fake providers and do not require an external model call in CI.
 
 ### Real document validation
 
@@ -218,6 +288,8 @@ SequenceMatcher whole-string similarity to native reference: 84.86%
 
 The recovered text was clearly readable and usable. Differences included visible header text found by OCR, list-numbering differences, and whitespace/layout differences. Layout/list interpretation is intentionally deferred to a later document-understanding layer.
 
+A live external-model classification of the real document has not yet been recorded as part of this status file; the classification feature is currently verified through deterministic API/provider tests and PostgreSQL integration with injected classifiers.
+
 ## V1 progress estimate
 
 | V1 capability | Weight | Status |
@@ -227,21 +299,20 @@ The recovered text was clearly readable and usable. Differences included visible
 | Original-file / artifact storage | 8% | Done |
 | Native PDF reader | 5% | Done |
 | Selective OCR for scanned PDFs | 8% | Done |
-| AI document classification | 10% | **Next** |
-| AI structured data extraction | 12% | Not started |
+| AI document classification | 10% | Done |
+| AI structured data extraction | 12% | **Next** |
 | WorkItem + deterministic workflow engine | 15% | Not started |
 | Human review / approval queue | 12% | Not started |
 | Basic frontend / dashboard | 8% | Not started |
 | First real intake connector | 4% | Not started |
 | Pilot polish / configuration | 3% | Not started |
 
-Current weighted completion: **~36%**.
+Current weighted completion: **~46%**.
 
 ## Not implemented yet
 
 The repository does **not** yet contain:
 
-- AI document classification
 - AI structured field extraction
 - document layout/list interpretation
 - WorkItem domain model
@@ -251,9 +322,9 @@ The repository does **not** yet contain:
 - production intake connectors
 - industry-specific workflow packs
 
-## Next feature: AI document classification
+## Next feature: AI structured data extraction
 
-The next slice should classify the readable text produced by `DocumentExtraction` without changing the document-ingestion foundation.
+The next slice should turn readable document text into application-defined structured fields without changing the intake, artifact, extraction, OCR, or classification foundations.
 
 Desired flow:
 
@@ -263,21 +334,25 @@ IntakeArtifact
 DocumentExtraction
 (native and/or OCR text)
      ↓
-AI document classification
+DocumentClassification
      ↓
-structured classification result
+AI structured data extraction
      ↓
-future structured extraction / workflow routing
+validated structured field result
+     ↓
+future WorkItem / deterministic workflow routing
 ```
 
-The classifier should follow existing architecture rules:
+The structured extraction feature should preserve existing architecture rules:
 
 - AI performs interpretation only.
+- The application defines and validates the structured output contract.
 - AI output crosses the application boundary as validated structured data.
-- Classification must not directly transition workflow state.
-- The AI provider should remain replaceable behind a narrow interface.
-- Core engine logic remains domain-neutral.
-- Do not add workflow, frontend, connectors, or industry-specific behavior as part of the classification slice unless explicitly requested.
+- Extraction must retain lineage to the source `DocumentExtraction` and, where used, the relevant `DocumentClassification`.
+- The AI provider remains replaceable behind a narrow interface.
+- Core engine logic remains domain-neutral; field definitions should be supplied by application configuration/request data rather than hard-coded industry assumptions.
+- Structured extraction must not directly transition workflow state or trigger actions.
+- Do not add WorkItem/workflow behavior, frontend, connectors, or industry-specific workflow packs as part of this slice unless explicitly requested.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 
