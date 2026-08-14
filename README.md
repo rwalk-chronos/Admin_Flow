@@ -163,3 +163,9 @@ ARTIFACT_STORAGE_PATH=/path/to/local/artifacts
 ```
 
 In Docker Compose, the backend uses `/data/artifacts`. The named `adminflow_artifacts` volume persists uploaded files across normal container shutdowns. As with the PostgreSQL volume, `docker compose down --volumes` permanently removes this development artifact volume and its stored files.
+
+## Native PDF document reading
+
+AdminFlow can deterministically extract native text from PDF IntakeArtifacts with pypdf. Each extraction preserves 1-based page boundaries, character counts, and whether each page lacks meaningful native text and will require OCR later. Password-protected and corrupt PDFs produce persisted diagnostic extraction statuses without modifying the original artifact.
+
+This foundation does not perform OCR, classify documents, or interpret extracted text.
