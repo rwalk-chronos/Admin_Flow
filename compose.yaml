@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: adminflow
+      POSTGRES_USER: adminflow
+      POSTGRES_PASSWORD: adminflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - adminflow_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adminflow -d adminflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://adminflow:adminflow@postgres:5432/adminflow
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  adminflow_postgres:
