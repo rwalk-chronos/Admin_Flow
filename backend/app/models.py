@@ -140,6 +140,12 @@ class DocumentExtraction(Base):
         nullable=False,
         index=True,
     )
+    source_extraction_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_extractions.id"),
+        nullable=True,
+        index=True,
+    )
     extraction_method: Mapped[str] = mapped_column(
         String(50), nullable=False, default="pdf_text", server_default="pdf_text"
     )
@@ -156,4 +162,13 @@ class DocumentExtraction(Base):
     )
     intake_artifact: Mapped[IntakeArtifact] = relationship(
         back_populates="extractions"
+    )
+    source_extraction: Mapped["DocumentExtraction | None"] = relationship(
+        remote_side=[id],
+        back_populates="derived_extractions",
+        foreign_keys=[source_extraction_id],
+    )
+    derived_extractions: Mapped[list["DocumentExtraction"]] = relationship(
+        back_populates="source_extraction",
+        foreign_keys=[source_extraction_id],
     )

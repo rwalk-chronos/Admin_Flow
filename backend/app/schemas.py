@@ -50,10 +50,16 @@ class IntakeArtifactResponse(BaseModel):
 
 
 class DocumentPageResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     page_number: int
     text: str
     character_count: int
     needs_ocr: bool
+
+
+class OcrDocumentPageResult(DocumentPageResult):
+    text_source: str
 
 
 class DocumentExtractionResponse(BaseModel):
@@ -61,11 +67,12 @@ class DocumentExtractionResponse(BaseModel):
 
     id: uuid.UUID
     intake_artifact_id: uuid.UUID
+    source_extraction_id: uuid.UUID | None
     extraction_method: str
     status: DocumentExtractionStatus
     page_count: int
     character_count: int
     text_content: str | None
-    page_results: list[DocumentPageResult]
+    page_results: list[DocumentPageResult | OcrDocumentPageResult]
     error_message: str | None
     created_at: datetime
