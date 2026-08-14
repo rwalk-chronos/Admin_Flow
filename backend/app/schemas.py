@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
@@ -114,4 +114,52 @@ class DocumentClassificationResponse(BaseModel):
     label: str
     confidence: float
     rationale: str
+    created_at: datetime
+
+
+StructuredFieldType = Literal[
+    "string", "integer", "number", "boolean", "date", "array_string"
+]
+
+
+class StructuredFieldDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    type: StructuredFieldType
+    required: bool
+
+    @model_validator(mode="after")
+    def name_must_not_be_blank(self) -> "StructuredFieldDefinition":
+        if not self.name.strip():
+            raise ValueError("field name must not be blank")
+        return self
+
+
+class DocumentStructuredExtractionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_classification_id: uuid.UUID | None = None
+    fields: list[StructuredFieldDefinition] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def field_names_are_unique(self) -> "DocumentStructuredExtractionCreate":
+        normalized_names = [field.name.strip().casefold() for field in self.fields]
+        if len(normalized_names) != len(set(normalized_names)):
+            raise ValueError("field names must be unique")
+        return self
+
+
+class DocumentStructuredExtractionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    document_extraction_id: uuid.UUID
+    document_classification_id: uuid.UUID | None
+    field_schema: list[StructuredFieldDefinition]
+    extracted_data: dict[str, Any]
+    provider_name: str
+    model_name: str
+    prompt_version: str
     created_at: datetime

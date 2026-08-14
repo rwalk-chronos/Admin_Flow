@@ -2,7 +2,7 @@
 
 AdminFlow is a local-first administrative workflow engine. It is designed to turn incoming unstructured information into structured, reviewable work items while keeping workflow state and business rules deterministic.
 
-> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral intake/artifact foundations, native PDF extraction, selective OCR, and AI document classification. It is not a production-ready AdminFlow application and does not yet contain workflow behavior.
+> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral intake/artifact foundations, native PDF extraction, selective OCR, AI document classification, and AI structured data extraction. It is not a production-ready AdminFlow application and does not yet contain workflow behavior.
 
 ## Architecture
 
@@ -121,7 +121,7 @@ The PostgreSQL integration test is skipped by default. To run it against the Com
 ADMINFLOW_RUN_DATABASE_INTEGRATION_TESTS=1 pytest -m integration
 ```
 
-`DATABASE_URL` may be set to test another database. GitHub Actions starts a dedicated PostgreSQL service and enables the integration test automatically. AI classification tests inject a stub classifier and do not make external model calls.
+`DATABASE_URL` may be set to test another database. GitHub Actions starts a dedicated PostgreSQL service and enables the integration test automatically. AI classification and structured-extraction tests inject stub providers and do not make external model calls.
 
 ## Database migrations
 
@@ -221,3 +221,40 @@ The result is persisted as an immutable `DocumentClassification` with:
 - concise classification rationale
 
 Classification does not transition workflow state or trigger actions. Those responsibilities remain in deterministic application logic and are intentionally outside this feature slice.
+
+## AI structured data extraction
+
+Readable `DocumentExtraction` text can be converted into validated structured data using field definitions supplied by the application. Supported V1 field types are `string`, `integer`, `number`, `boolean`, `date`, and `array_string`. A `DocumentClassification` may be supplied as optional context, but structured extraction does not require classification and never selects one automatically.
+
+The provider is replaceable behind the `DocumentStructuredExtractor` interface. The OpenAI adapter reuses `OPENAI_API_KEY` and has a separate model setting:
+
+```dotenv
+AI_STRUCTURED_EXTRACTION_MODEL=gpt-5-mini
+```
+
+Create a structured extraction:
+
+```bash
+curl -X POST \
+  http://localhost:8000/document-extractions/EXTRACTION_ID/structured-extractions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "document_classification_id": null,
+    "fields": [
+      {
+        "name": "title",
+        "description": "Title of the document",
+        "type": "string",
+        "required": true
+      },
+      {
+        "name": "effective_date",
+        "description": "Date the document became effective",
+        "type": "date",
+        "required": false
+      }
+    ]
+  }'
+```
+
+The immutable `DocumentStructuredExtraction` stores source lineage, the exact requested field-definition snapshot, validated extracted data, and provider/model/prompt metadata. Application code validates the exact field set, required/null behavior, scalar types, real ISO calendar dates, and string-array elements after every provider response. Structured extraction does not create WorkItems, transition workflow state, or trigger actions.

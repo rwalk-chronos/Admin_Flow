@@ -4,7 +4,7 @@ Status captured: 2026-08-14
 
 ## Current state
 
-AdminFlow is at a clean feature boundary with AI document classification implemented on top of the native PDF and selective OCR foundation.
+AdminFlow has locally validated AI structured data extraction implemented on top of the classification and document-reading foundations.
 
 Last feature merge:
 
@@ -12,9 +12,9 @@ Last feature merge:
 - merge commit `117afaa3d221f3594bb0f818605bf14768714c46`
 - GitHub Actions: passed, including PostgreSQL migrations through `20260814_0006` and the full pytest suite
 
-Estimated V1 completion: **~46%**.
+Estimated V1 completion: **~58%**.
 
-**Next: AI structured data extraction.**
+**Next: WorkItem + deterministic workflow engine.**
 
 ## Product architecture
 
@@ -52,11 +52,13 @@ page text       pypdfium2
                     ↓
           source_extraction_id lineage
                     ↓
-         AI document classifier
+          DocumentExtraction
                     ↓
-       validated structured result
+      optional DocumentClassification
                     ↓
-        DocumentClassification
+    DocumentStructuredExtraction
+                    ↓
+           future WorkItem
 ```
 
 ### Backend
@@ -119,6 +121,17 @@ page text       pypdfium2
 - Missing AI configuration affects only classification requests; the deterministic intake/extraction/OCR foundation remains usable.
 - Classification does not transition workflow state or trigger actions.
 
+### AI structured data extraction
+
+- Structured extraction consumes readable `DocumentExtraction.text_content` without modifying it.
+- The application supplies a constrained field-definition contract; no industry fields are hard-coded.
+- Supported V1 types are string, integer, number, boolean, ISO date, and string array.
+- Optional classification context is accepted only after deterministic same-extraction lineage validation.
+- The replaceable `DocumentStructuredExtractor` interface isolates the OpenAI Responses API adapter.
+- Provider output is deterministically revalidated for exact keys, required values, strict types, real calendar dates, and string arrays before persistence.
+- Immutable results retain extraction lineage, optional classification lineage, the exact field-schema snapshot, and provider metadata.
+- Structured extraction does not create WorkItems, transition workflow state, or trigger actions.
+
 ### API / domain objects implemented
 
 #### IntakeEvent
@@ -170,6 +183,10 @@ Persisted fields include:
 
 Implemented API operations include create, list-by-extraction, and get-by-ID.
 
+#### DocumentStructuredExtraction
+
+Represents one immutable, deterministically validated structured result derived from readable document text. It stores required `DocumentExtraction` lineage, optional same-extraction `DocumentClassification` lineage, JSONB field-schema and data snapshots, provider/model/prompt metadata, and a timestamp. Implemented API operations include create, list-by-extraction, and get-by-ID.
+
 ## Infrastructure and development environment
 
 - Docker Compose development environment
@@ -180,7 +197,7 @@ Implemented API operations include create, list-by-extraction, and get-by-ID.
 - PostgreSQL health endpoint
 - GitHub Actions CI
 - pytest test suite
-- Alembic migration chain through `20260814_0006`
+- Alembic migration chain through `20260814_0007`
 
 The local development stack has been run successfully on Ubuntu Linux.
 
@@ -231,6 +248,14 @@ The local development stack has been run successfully on Ubuntu Linux.
    - provider/model/prompt metadata retained
    - no workflow-state or action behavior added
 
+7. **AI structured data extraction**
+   - application-defined constrained field contracts
+   - replaceable structured-extractor interface and OpenAI adapter
+   - strict deterministic validation after provider output
+   - immutable JSONB results with extraction and optional classification lineage
+   - create/list/get API
+   - no WorkItem, workflow-state, or action behavior
+
 ## Verification and test results
 
 ### Selective OCR baseline
@@ -266,6 +291,10 @@ The CI job successfully completed:
 
 Classification tests use injected stub/fake providers and do not require an external model call in CI.
 
+### AI structured data extraction
+
+The locally validated implementation adds migration `20260814_0007`, 29 focused provider/API checks, strict post-provider contract validation, and PostgreSQL integration coverage using an injected provider. Automated validation makes no external OpenAI request.
+
 ### Real document validation
 
 A real `Condenser Pump Down` PDF was used to validate both extraction paths.
@@ -300,20 +329,19 @@ A live external-model classification of the real document has not yet been recor
 | Native PDF reader | 5% | Done |
 | Selective OCR for scanned PDFs | 8% | Done |
 | AI document classification | 10% | Done |
-| AI structured data extraction | 12% | **Next** |
-| WorkItem + deterministic workflow engine | 15% | Not started |
+| AI structured data extraction | 12% | Done |
+| WorkItem + deterministic workflow engine | 15% | **Next** |
 | Human review / approval queue | 12% | Not started |
 | Basic frontend / dashboard | 8% | Not started |
 | First real intake connector | 4% | Not started |
 | Pilot polish / configuration | 3% | Not started |
 
-Current weighted completion: **~46%**.
+Current weighted completion: **~58%**.
 
 ## Not implemented yet
 
 The repository does **not** yet contain:
 
-- AI structured field extraction
 - document layout/list interpretation
 - WorkItem domain model
 - deterministic workflow/state engine
@@ -322,37 +350,9 @@ The repository does **not** yet contain:
 - production intake connectors
 - industry-specific workflow packs
 
-## Next feature: AI structured data extraction
+## Next feature: WorkItem + deterministic workflow engine
 
-The next slice should turn readable document text into application-defined structured fields without changing the intake, artifact, extraction, OCR, or classification foundations.
-
-Desired flow:
-
-```text
-IntakeArtifact
-     ↓
-DocumentExtraction
-(native and/or OCR text)
-     ↓
-DocumentClassification
-     ↓
-AI structured data extraction
-     ↓
-validated structured field result
-     ↓
-future WorkItem / deterministic workflow routing
-```
-
-The structured extraction feature should preserve existing architecture rules:
-
-- AI performs interpretation only.
-- The application defines and validates the structured output contract.
-- AI output crosses the application boundary as validated structured data.
-- Extraction must retain lineage to the source `DocumentExtraction` and, where used, the relevant `DocumentClassification`.
-- The AI provider remains replaceable behind a narrow interface.
-- Core engine logic remains domain-neutral; field definitions should be supplied by application configuration/request data rather than hard-coded industry assumptions.
-- Structured extraction must not directly transition workflow state or trigger actions.
-- Do not add WorkItem/workflow behavior, frontend, connectors, or industry-specific workflow packs as part of this slice unless explicitly requested.
+The next slice should introduce WorkItems and deterministic workflow behavior using existing immutable intake, artifact, extraction, classification, and structured-extraction records as source lineage. No WorkItem or workflow functionality exists yet.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 
