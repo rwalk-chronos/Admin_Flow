@@ -2,15 +2,15 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: adminflow
-      POSTGRES_USER: adminflow
-      POSTGRES_PASSWORD: adminflow
+      POSTGRES_DB: ${POSTGRES_DB:-adminflow}
+      POSTGRES_USER: ${POSTGRES_USER:-adminflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-adminflow}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - adminflow_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U adminflow -d adminflow"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -19,12 +19,18 @@ services:
     build:
       context: ./backend
     environment:
-      DATABASE_URL: postgresql+psycopg://adminflow:adminflow@postgres:5432/adminflow
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adminflow}:${POSTGRES_PASSWORD:-adminflow}@postgres:5432/${POSTGRES_DB:-adminflow}
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
 volumes:
   adminflow_postgres:

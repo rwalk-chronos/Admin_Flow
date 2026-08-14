@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "AdminFlow FastAPI backend"
 requires-python = ">=3.12"
 dependencies = [
+  "alembic>=1.16,<2.0",
   "fastapi>=0.116,<1.0",
   "uvicorn[standard]>=0.35,<1.0",
   "sqlalchemy>=2.0,<3.0",
@@ -27,3 +28,6 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "integration: tests that require an external service"
+]
