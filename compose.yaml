@@ -21,6 +21,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adminflow}:${POSTGRES_PASSWORD:-adminflow}@postgres:5432/${POSTGRES_DB:-adminflow}
       ARTIFACT_STORAGE_PATH: ${ARTIFACT_STORAGE_PATH:-/data/artifacts}
+      OCR_LANGUAGE: ${OCR_LANGUAGE:-eng}
+      OCR_DPI: ${OCR_DPI:-300}
+      OCR_TIMEOUT_SECONDS: ${OCR_TIMEOUT_SECONDS:-30}
     ports:
       - "8000:8000"
     volumes:

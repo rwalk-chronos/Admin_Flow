@@ -168,4 +168,16 @@ In Docker Compose, the backend uses `/data/artifacts`. The named `adminflow_arti
 
 AdminFlow can deterministically extract native text from PDF IntakeArtifacts with pypdf. Each extraction preserves 1-based page boundaries, character counts, and whether each page lacks meaningful native text and will require OCR later. Password-protected and corrupt PDFs produce persisted diagnostic extraction statuses without modifying the original artifact.
 
-This foundation does not perform OCR, classify documents, or interpret extracted text.
+When native extraction marks pages as requiring OCR, the selective OCR endpoint
+rasterizes only those pages at 300 DPI and runs Tesseract. Native page text is
+preserved exactly in a new immutable derived extraction:
+
+```text
+native PDF text extraction
+           ↓
+selective OCR only for pages requiring it
+```
+
+OCR defaults can be overridden with `OCR_LANGUAGE`, `OCR_DPI`, and
+`OCR_TIMEOUT_SECONDS`. The current foundation supports English PDF OCR only; it
+does not classify documents or interpret extracted text.

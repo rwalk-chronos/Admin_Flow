@@ -13,7 +13,7 @@ from app.db import database_is_ready, get_engine
 from app.intake_artifacts import get_artifact_storage
 from app.main import app
 from app.models import DocumentExtraction, IntakeArtifact, IntakeEvent
-from tests.pdf_samples import build_pdf
+from tests.pdf_samples import build_image_pdf, build_pdf
 
 
 pytestmark = pytest.mark.integration
@@ -253,6 +253,7 @@ def test_document_extraction_migration_schema() -> None:
     assert columns == {
         "id",
         "intake_artifact_id",
+        "source_extraction_id",
         "extraction_method",
         "status",
         "page_count",
@@ -270,8 +271,48 @@ def test_document_extraction_migration_schema() -> None:
     assert any(
         index["column_names"] == ["intake_artifact_id"] for index in indexes
     )
+    assert any(
+        key["referred_table"] == "document_extractions"
+        and key["constrained_columns"] == ["source_extraction_id"]
+        for key in foreign_keys
+    )
+    assert any(
+        index["column_names"] == ["source_extraction_id"] for index in indexes
+    )
     assert {check["name"] for check in checks} >= {
         "ck_document_extractions_status",
         "ck_document_extractions_page_count",
         "ck_document_extractions_character_count",
     }
+
+
+def test_ocr_extraction_persists_lineage_and_jsonb_in_postgresql(
+    clean_intake_events: None, tmp_path: Path
+) -> None:
+    storage = LocalArtifactStorage(tmp_path)
+    app.dependency_overrides[get_artifact_storage] = lambda: storage
+    try:
+        with TestClient(app) as client:
+            event = client.post(
+                "/intake-events",
+                json={"source_type": "manual_upload", "received_at": "2026-08-14T20:00:00Z"},
+            ).json()
+            artifact = client.post(
+                f"/intake-events/{event['id']}/artifacts",
+                files={"file": ("scanned.pdf", build_image_pdf("ADMINFLOW OCR TEST\nDOCUMENT 12345"), "application/pdf")},
+            ).json()
+            source = client.post(f"/intake-artifacts/{artifact['id']}/extract").json()
+            response = client.post(f"/document-extractions/{source['id']}/ocr")
+    finally:
+        app.dependency_overrides.pop(get_artifact_storage, None)
+
+    assert response.status_code == 201
+    derived = response.json()
+    assert derived["status"] == "extracted"
+    assert derived["source_extraction_id"] == source["id"]
+    with Session(get_engine()) as session:
+        persisted = session.get(DocumentExtraction, uuid.UUID(derived["id"]))
+        assert persisted is not None
+        assert persisted.source_extraction.id == uuid.UUID(source["id"])
+        assert persisted.page_results == derived["page_results"]
+        assert persisted.page_results[0]["text_source"] == "ocr"

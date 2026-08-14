@@ -1,4 +1,7 @@
 from io import BytesIO
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
 
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
@@ -48,6 +51,29 @@ def build_encrypted_pdf(text: str, password: str = "secret") -> bytes:
     writer = PdfWriter()
     writer.append_pages_from_reader(reader)
     writer.encrypt(password)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def build_image_pdf(text: str) -> bytes:
+    font_path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    if not font_path.exists():
+        raise FileNotFoundError("DejaVu Sans is required for the OCR fixture")
+    image = Image.new("RGB", (1800, 1200), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.truetype(str(font_path), 110)
+    draw.multiline_text((120, 300), text, fill="black", font=font, spacing=50)
+    output = BytesIO()
+    image.save(output, format="PDF", resolution=300)
+    image.close()
+    return output.getvalue()
+
+
+def combine_pdfs(*documents: bytes) -> bytes:
+    writer = PdfWriter()
+    for document in documents:
+        writer.append_pages_from_reader(PdfReader(BytesIO(document)))
     output = BytesIO()
     writer.write(output)
     return output.getvalue()
