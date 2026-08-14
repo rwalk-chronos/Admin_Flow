@@ -20,8 +20,11 @@ services:
       context: ./backend
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-adminflow}:${POSTGRES_PASSWORD:-adminflow}@postgres:5432/${POSTGRES_DB:-adminflow}
+      ARTIFACT_STORAGE_PATH: ${ARTIFACT_STORAGE_PATH:-/data/artifacts}
     ports:
       - "8000:8000"
+    volumes:
+      - adminflow_artifacts:${ARTIFACT_STORAGE_PATH:-/data/artifacts}
     depends_on:
       postgres:
         condition: service_healthy
@@ -34,3 +37,4 @@ services:
 
 volumes:
   adminflow_postgres:
+  adminflow_artifacts:

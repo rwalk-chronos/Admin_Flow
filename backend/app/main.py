@@ -2,10 +2,12 @@ from fastapi import FastAPI, Response, status
 
 from app.config import get_settings
 from app.db import database_is_ready
+from app.intake_artifacts import router as intake_artifacts_router
 from app.intake_events import router as intake_events_router
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
+app.include_router(intake_artifacts_router)
 app.include_router(intake_events_router)
 
 

@@ -1,15 +1,18 @@
 import os
 import uuid
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, inspect, select
 from sqlalchemy.orm import Session
 
+from app.artifact_storage import LocalArtifactStorage
 from app.db import database_is_ready, get_engine
+from app.intake_artifacts import get_artifact_storage
 from app.main import app
-from app.models import IntakeEvent
+from app.models import IntakeArtifact, IntakeEvent
 
 
 pytestmark = pytest.mark.integration
@@ -26,10 +29,12 @@ def require_integration_database() -> None:
 @pytest.fixture
 def clean_intake_events() -> Generator[None, None, None]:
     with Session(get_engine()) as session:
+        session.execute(delete(IntakeArtifact))
         session.execute(delete(IntakeEvent))
         session.commit()
     yield
     with Session(get_engine()) as session:
+        session.execute(delete(IntakeArtifact))
         session.execute(delete(IntakeEvent))
         session.commit()
 
@@ -104,3 +109,79 @@ def test_intake_event_listing_retrieval_and_unknown_id(
     assert retrieve_response.status_code == 200
     assert retrieve_response.json()["raw_metadata"] == {"device": "scanner-1"}
     assert missing_response.status_code == 404
+
+
+def test_intake_artifact_persists_in_postgresql_and_local_storage(
+    clean_intake_events: None, tmp_path: Path
+) -> None:
+    storage = LocalArtifactStorage(tmp_path)
+    app.dependency_overrides[get_artifact_storage] = lambda: storage
+    content = b"postgresql-backed original artifact"
+
+    try:
+        with TestClient(app) as client:
+            event = client.post(
+                "/intake-events",
+                json={
+                    "source_type": "manual_upload",
+                    "received_at": "2026-08-14T17:00:00Z",
+                },
+            ).json()
+            response = client.post(
+                f"/intake-events/{event['id']}/artifacts",
+                files={"file": ("source.bin", content, "application/octet-stream")},
+            )
+    finally:
+        app.dependency_overrides.pop(get_artifact_storage, None)
+
+    assert response.status_code == 201
+    created = response.json()
+
+    with Session(get_engine()) as session:
+        artifact = session.scalar(
+            select(IntakeArtifact).where(
+                IntakeArtifact.id == uuid.UUID(created["id"])
+            )
+        )
+
+    assert artifact is not None
+    assert artifact.intake_event_id == uuid.UUID(event["id"])
+    assert artifact.original_filename == "source.bin"
+    assert artifact.content_type == "application/octet-stream"
+    assert artifact.byte_size == len(content)
+    assert artifact.sha256 == created["sha256"]
+    assert artifact.created_at.tzinfo is not None
+    with storage.open(artifact.storage_key) as stored_file:
+        assert stored_file.read() == content
+
+
+def test_intake_artifact_migration_schema() -> None:
+    inspector = inspect(get_engine())
+
+    columns = {column["name"] for column in inspector.get_columns("intake_artifacts")}
+    foreign_keys = inspector.get_foreign_keys("intake_artifacts")
+    indexes = inspector.get_indexes("intake_artifacts")
+    checks = inspector.get_check_constraints("intake_artifacts")
+
+    assert columns == {
+        "id",
+        "intake_event_id",
+        "original_filename",
+        "content_type",
+        "byte_size",
+        "sha256",
+        "storage_key",
+        "created_at",
+    }
+    assert any(
+        key["referred_table"] == "intake_events"
+        and key["constrained_columns"] == ["intake_event_id"]
+        for key in foreign_keys
+    )
+    assert any(
+        index["column_names"] == ["intake_event_id"] for index in indexes
+    )
+    assert {check["name"] for check in checks} >= {
+        "ck_intake_artifacts_byte_size",
+        "ck_intake_artifacts_sha256_length",
+    }
