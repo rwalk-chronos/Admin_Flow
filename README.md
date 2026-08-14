@@ -2,7 +2,7 @@
 
 AdminFlow is a local-first administrative workflow engine. It is designed to turn incoming unstructured information into structured, reviewable work items while keeping workflow state and business rules deterministic.
 
-> **Development bootstrap:** This repository currently contains only the runnable backend, PostgreSQL connectivity, health checks, migration infrastructure, and tests. It is not a production-ready AdminFlow application and does not yet contain domain models or workflow behavior.
+> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, and the initial domain-neutral intake event and artifact foundations. It is not a production-ready AdminFlow application and does not yet contain workflow behavior.
 
 ## Architecture
 
@@ -151,3 +151,15 @@ After future SQLAlchemy models are introduced, create a migration explicitly and
 ```bash
 alembic revision -m "describe the schema change"
 ```
+
+## Local artifact storage
+
+Original IntakeArtifact bytes are stored on the local filesystem, not in PostgreSQL. PostgreSQL stores only immutable artifact metadata and a generated internal storage key. Files are written in chunks while SHA-256 and byte size are calculated.
+
+For host development, `ARTIFACT_STORAGE_PATH` defaults to `data/artifacts` relative to the backend working directory and can be changed in `backend/.env`:
+
+```dotenv
+ARTIFACT_STORAGE_PATH=/path/to/local/artifacts
+```
+
+In Docker Compose, the backend uses `/data/artifacts`. The named `adminflow_artifacts` volume persists uploaded files across normal container shutdowns. As with the PostgreSQL volume, `docker compose down --volumes` permanently removes this development artifact volume and its stored files.

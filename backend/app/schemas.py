@@ -35,3 +35,15 @@ class IntakeEventResponse(BaseModel):
     raw_metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+
+
+class IntakeArtifactResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    intake_event_id: uuid.UUID
+    original_filename: str | None
+    content_type: str | None
+    byte_size: int
+    sha256: str
+    created_at: datetime
