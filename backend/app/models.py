@@ -176,6 +176,9 @@ class DocumentExtraction(Base):
     classifications: Mapped[list["DocumentClassification"]] = relationship(
         back_populates="document_extraction"
     )
+    structured_extractions: Mapped[list["DocumentStructuredExtraction"]] = relationship(
+        back_populates="document_extraction"
+    )
 
 
 class DocumentClassification(Base):
@@ -210,4 +213,45 @@ class DocumentClassification(Base):
     )
     document_extraction: Mapped[DocumentExtraction] = relationship(
         back_populates="classifications"
+    )
+    structured_extractions: Mapped[list["DocumentStructuredExtraction"]] = relationship(
+        back_populates="document_classification"
+    )
+
+
+class DocumentStructuredExtraction(Base):
+    __tablename__ = "document_structured_extractions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    document_extraction_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_extractions.id"),
+        nullable=False,
+        index=True,
+    )
+    document_classification_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_classifications.id"),
+        nullable=True,
+        index=True,
+    )
+    field_schema: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    extracted_data: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    provider_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    document_extraction: Mapped[DocumentExtraction] = relationship(
+        back_populates="structured_extractions"
+    )
+    document_classification: Mapped[DocumentClassification | None] = relationship(
+        back_populates="structured_extractions"
     )
