@@ -77,7 +77,9 @@ class IntakeArtifact(Base):
     __tablename__ = "intake_artifacts"
     __table_args__ = (
         CheckConstraint("byte_size >= 0", name="ck_intake_artifacts_byte_size"),
-        CheckConstraint("length(sha256) = 64", name="ck_intake_artifacts_sha256_length"),
+        CheckConstraint(
+            "length(sha256) = 64", name="ck_intake_artifacts_sha256_length"
+        ),
         UniqueConstraint("storage_key", name="uq_intake_artifacts_storage_key"),
     )
 
@@ -99,3 +101,59 @@ class IntakeArtifact(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     intake_event: Mapped[IntakeEvent] = relationship(back_populates="artifacts")
+    extractions: Mapped[list["DocumentExtraction"]] = relationship(
+        back_populates="intake_artifact"
+    )
+
+
+class DocumentExtractionStatus(StrEnum):
+    EXTRACTED = "extracted"
+    PARTIAL = "partial"
+    NEEDS_OCR = "needs_ocr"
+    PASSWORD_REQUIRED = "password_required"
+    FAILED = "failed"
+
+
+class DocumentExtraction(Base):
+    __tablename__ = "document_extractions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('extracted', 'partial', 'needs_ocr', "
+            "'password_required', 'failed')",
+            name="ck_document_extractions_status",
+        ),
+        CheckConstraint(
+            "page_count >= 0", name="ck_document_extractions_page_count"
+        ),
+        CheckConstraint(
+            "character_count >= 0",
+            name="ck_document_extractions_character_count",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    intake_artifact_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("intake_artifacts.id"),
+        nullable=False,
+        index=True,
+    )
+    extraction_method: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="pdf_text", server_default="pdf_text"
+    )
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    page_count: Mapped[int] = mapped_column(nullable=False)
+    character_count: Mapped[int] = mapped_column(nullable=False)
+    text_content: Mapped[str | None] = mapped_column(Text)
+    page_results: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    intake_artifact: Mapped[IntakeArtifact] = relationship(
+        back_populates="extractions"
+    )

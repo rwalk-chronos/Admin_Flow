@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from app.models import IntakeEventStatus
+from app.models import DocumentExtractionStatus, IntakeEventStatus
 
 
 class IntakeEventCreate(BaseModel):
@@ -46,4 +46,26 @@ class IntakeArtifactResponse(BaseModel):
     content_type: str | None
     byte_size: int
     sha256: str
+    created_at: datetime
+
+
+class DocumentPageResult(BaseModel):
+    page_number: int
+    text: str
+    character_count: int
+    needs_ocr: bool
+
+
+class DocumentExtractionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    intake_artifact_id: uuid.UUID
+    extraction_method: str
+    status: DocumentExtractionStatus
+    page_count: int
+    character_count: int
+    text_content: str | None
+    page_results: list[DocumentPageResult]
+    error_message: str | None
     created_at: datetime

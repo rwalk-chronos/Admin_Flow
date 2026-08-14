@@ -12,7 +12,8 @@ from app.artifact_storage import LocalArtifactStorage
 from app.db import database_is_ready, get_engine
 from app.intake_artifacts import get_artifact_storage
 from app.main import app
-from app.models import IntakeArtifact, IntakeEvent
+from app.models import DocumentExtraction, IntakeArtifact, IntakeEvent
+from tests.pdf_samples import build_pdf
 
 
 pytestmark = pytest.mark.integration
@@ -29,11 +30,13 @@ def require_integration_database() -> None:
 @pytest.fixture
 def clean_intake_events() -> Generator[None, None, None]:
     with Session(get_engine()) as session:
+        session.execute(delete(DocumentExtraction))
         session.execute(delete(IntakeArtifact))
         session.execute(delete(IntakeEvent))
         session.commit()
     yield
     with Session(get_engine()) as session:
+        session.execute(delete(DocumentExtraction))
         session.execute(delete(IntakeArtifact))
         session.execute(delete(IntakeEvent))
         session.commit()
@@ -184,4 +187,91 @@ def test_intake_artifact_migration_schema() -> None:
     assert {check["name"] for check in checks} >= {
         "ck_intake_artifacts_byte_size",
         "ck_intake_artifacts_sha256_length",
+    }
+
+
+def test_document_extraction_persists_jsonb_and_artifact_relationship(
+    clean_intake_events: None, tmp_path: Path
+) -> None:
+    storage = LocalArtifactStorage(tmp_path)
+    app.dependency_overrides[get_artifact_storage] = lambda: storage
+
+    try:
+        with TestClient(app) as client:
+            event = client.post(
+                "/intake-events",
+                json={
+                    "source_type": "manual_upload",
+                    "received_at": "2026-08-14T19:00:00Z",
+                },
+            ).json()
+            artifact = client.post(
+                f"/intake-events/{event['id']}/artifacts",
+                files={
+                    "file": (
+                        "native.pdf",
+                        build_pdf(["PostgreSQL page one", "PostgreSQL page two"]),
+                        "application/pdf",
+                    )
+                },
+            ).json()
+            response = client.post(
+                f"/intake-artifacts/{artifact['id']}/extract"
+            )
+    finally:
+        app.dependency_overrides.pop(get_artifact_storage, None)
+
+    assert response.status_code == 201
+    created = response.json()
+
+    with Session(get_engine()) as session:
+        extraction = session.scalar(
+            select(DocumentExtraction).where(
+                DocumentExtraction.id == uuid.UUID(created["id"])
+            )
+        )
+        assert extraction is not None
+        assert extraction.intake_artifact.id == uuid.UUID(artifact["id"])
+        assert extraction.status == "extracted"
+        assert extraction.page_count == 2
+        assert extraction.page_results == created["page_results"]
+        assert extraction.page_results[0]["page_number"] == 1
+        assert extraction.page_results[1]["page_number"] == 2
+        assert extraction.created_at.tzinfo is not None
+
+
+def test_document_extraction_migration_schema() -> None:
+    inspector = inspect(get_engine())
+
+    columns = {
+        column["name"] for column in inspector.get_columns("document_extractions")
+    }
+    foreign_keys = inspector.get_foreign_keys("document_extractions")
+    indexes = inspector.get_indexes("document_extractions")
+    checks = inspector.get_check_constraints("document_extractions")
+
+    assert columns == {
+        "id",
+        "intake_artifact_id",
+        "extraction_method",
+        "status",
+        "page_count",
+        "character_count",
+        "text_content",
+        "page_results",
+        "error_message",
+        "created_at",
+    }
+    assert any(
+        key["referred_table"] == "intake_artifacts"
+        and key["constrained_columns"] == ["intake_artifact_id"]
+        for key in foreign_keys
+    )
+    assert any(
+        index["column_names"] == ["intake_artifact_id"] for index in indexes
+    )
+    assert {check["name"] for check in checks} >= {
+        "ck_document_extractions_status",
+        "ck_document_extractions_page_count",
+        "ck_document_extractions_character_count",
     }
