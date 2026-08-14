@@ -4,7 +4,7 @@ Status captured: 2026-08-14
 
 ## Current state
 
-AdminFlow has locally validated AI structured data extraction implemented on top of the classification and document-reading foundations.
+AdminFlow has AI structured data extraction implemented on top of the classification and document-reading foundations. Draft PR #7 has passed GitHub Actions validation.
 
 Last feature merge:
 
@@ -293,7 +293,7 @@ Classification tests use injected stub/fake providers and do not require an exte
 
 ### AI structured data extraction
 
-The locally validated implementation adds migration `20260814_0007`, 29 focused provider/API checks, strict post-provider contract validation, and PostgreSQL integration coverage using an injected provider. Automated validation makes no external OpenAI request.
+Draft PR #7 passed GitHub Actions with PostgreSQL migration through `20260814_0007` and the complete test suite: 82 passed, 0 skipped, and 0 failed. Both structured-extraction PostgreSQL integration tests executed and passed using an injected provider. Automated validation made no external OpenAI request.
 
 ### Real document validation
 

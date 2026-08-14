@@ -350,6 +350,9 @@ def test_invalid_field_definitions_are_rejected_before_provider(
         ("integer", "123"),
         ("integer", True),
         ("number", "4.2"),
+        ("number", float("nan")),
+        ("number", float("inf")),
+        ("number", float("-inf")),
         ("number", False),
         ("boolean", 1),
         ("date", "2026/08/14"),
@@ -379,6 +382,30 @@ def test_wrong_provider_value_types_return_502_and_persist_nothing(
     assert response.status_code == 502
     with Session(engine) as session:
         assert session.scalars(select(DocumentStructuredExtraction)).all() == []
+
+
+def test_very_large_integer_is_a_valid_number(client, engine, extractor):
+    extraction_id = create_extraction(engine)
+    very_large_integer = 10**1000
+    extractor.data = {"value": very_large_integer}
+    response = client.post(
+        f"/document-extractions/{extraction_id}/structured-extractions",
+        json={
+            "fields": [
+                {
+                    "name": "value",
+                    "description": "Large numeric value",
+                    "type": "number",
+                    "required": True,
+                }
+            ]
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["extracted_data"] == {"value": very_large_integer}
+    with Session(engine) as session:
+        persisted = session.scalar(select(DocumentStructuredExtraction))
+        assert persisted.extracted_data == {"value": very_large_integer}
 
 
 @pytest.mark.parametrize(

@@ -158,7 +158,9 @@ def _value_matches_type(field_type: str, value: Any) -> bool:
     if field_type == "integer":
         return type(value) is int
     if field_type == "number":
-        return type(value) in {int, float} and math.isfinite(value)
+        if type(value) is int:
+            return True
+        return type(value) is float and math.isfinite(value)
     if field_type == "boolean":
         return type(value) is bool
     if field_type == "date":
