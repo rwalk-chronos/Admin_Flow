@@ -4,13 +4,15 @@ Status captured: 2026-08-14
 
 ## Current state
 
-AdminFlow has AI structured data extraction implemented on top of the classification and document-reading foundations. Draft PR #7 has passed GitHub Actions validation.
+AdminFlow is at a clean feature boundary with AI structured data extraction merged to `main` on top of the classification and document-reading foundations.
 
 Last feature merge:
 
-- PR #6 — `Add AI document classification` — merged to `main`
-- merge commit `117afaa3d221f3594bb0f818605bf14768714c46`
-- GitHub Actions: passed, including PostgreSQL migrations through `20260814_0006` and the full pytest suite
+- PR #7 — `Add AI structured data extraction` — merged to `main`
+- merge commit `3f5ab13372fa8942c0460f2c9bc2b99bb7ad7b26`
+- final GitHub Actions validation: 86 passed, 0 skipped, and 0 failed
+- PostgreSQL integration tests ran and passed
+- Alembic upgraded through `20260814_0007`
 
 Estimated V1 completion: **~58%**.
 
@@ -293,7 +295,7 @@ Classification tests use injected stub/fake providers and do not require an exte
 
 ### AI structured data extraction
 
-Draft PR #7 passed GitHub Actions with PostgreSQL migration through `20260814_0007` and the complete test suite: 82 passed, 0 skipped, and 0 failed. Both structured-extraction PostgreSQL integration tests executed and passed using an injected provider. Automated validation made no external OpenAI request.
+PR #7 was merged to `main` as `3f5ab13372fa8942c0460f2c9bc2b99bb7ad7b26` after final GitHub Actions validation passed with 86 tests, 0 skipped, and 0 failed. PostgreSQL integration tests executed and passed, including both structured-extraction integration tests, and Alembic upgraded through `20260814_0007`. Automated validation made no external OpenAI request.
 
 ### Real document validation
 
