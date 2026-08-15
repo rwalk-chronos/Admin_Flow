@@ -71,6 +71,10 @@ def test_manual_intake_wires_existing_processing_apis_deterministically() -> Non
     assert 'request(`/intake-artifacts/${artifact.id}/extract`' in source
     assert 'request(`/document-extractions/${extraction.id}/ocr`' in source
     assert 'status === "partial" || status === "needs_ocr"' in source
+    assert 'extraction.status === "partial"' in source
+    assert 'typeof extraction.text_content === "string"' in source
+    assert "extraction.text_content.trim().length > 0" in source
+    assert "if (hasReadableText(ocr))" in source
     assert "document-extractions/${extraction.id}/classifications" not in source
     assert "structured-extractions" not in source
     assert "OpenAI" not in source

@@ -1,4 +1,6 @@
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pytest
@@ -8,13 +10,25 @@ from sqlalchemy.orm import Session
 
 from app.db import get_engine
 from app.document_classifications import get_document_classifier
-from app.document_classifier import LocalStubDocumentClassifier
+from app.document_classifier import ClassificationResult, LocalStubDocumentClassifier
 from app.document_structured_extractions import get_document_structured_extractor
 from app.document_structured_extractor import LocalStubDocumentStructuredExtractor
 from app.main import app
 from app.models import DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
 
 pytestmark = pytest.mark.integration
+
+
+class ConcurrentClassifier(LocalStubDocumentClassifier):
+    barrier = threading.Barrier(2)
+
+    def classify(self, *, text, candidate_labels):
+        self.barrier.wait(timeout=10)
+        return ClassificationResult(
+            label="invoice",
+            confidence=1.0,
+            rationale="Synchronized deterministic test classification",
+        )
 
 
 def test_postgresql_complete_stub_pipeline_atomic_lineage_and_idempotency():
@@ -51,5 +65,68 @@ def test_postgresql_complete_stub_pipeline_atomic_lineage_and_idempotency():
         session.execute(delete(DocumentExtraction).where(DocumentExtraction.id == extraction_id))
         session.execute(delete(IntakeArtifact).where(IntakeArtifact.storage_key == "integration/dual-mode-pipeline"))
         session.execute(delete(IntakeEvent).where(IntakeEvent.subject == "PostgreSQL pipeline"))
+        session.execute(delete(WorkflowDefinition).where(WorkflowDefinition.name == "generic_document_review"))
+        session.commit()
+
+
+def test_postgresql_concurrent_processing_is_idempotent():
+    if os.getenv("ADMINFLOW_RUN_DATABASE_INTEGRATION_TESTS") != "1":
+        pytest.skip("set ADMINFLOW_RUN_DATABASE_INTEGRATION_TESTS=1 to run PostgreSQL integration tests")
+    storage_key = "integration/concurrent-dual-mode-pipeline"
+    subject = "PostgreSQL concurrent pipeline"
+    text = "INVOICE\nVendor Name: Concurrent Supply\nInvoice Number: RACE-1001\nAmount Due: 25.50"
+    with Session(get_engine()) as session:
+        event = IntakeEvent(source_type="manual_upload", subject=subject, received_at=datetime.now(timezone.utc), raw_metadata={})
+        artifact = IntakeArtifact(intake_event=event, original_filename="race.pdf", content_type="application/pdf", byte_size=5, sha256="c" * 64, storage_key=storage_key)
+        extraction = DocumentExtraction(intake_artifact=artifact, extraction_method="pdf_text", status="extracted", page_count=1, character_count=len(text), text_content=text, page_results=[])
+        session.add(extraction)
+        session.commit()
+        extraction_id = extraction.id
+        artifact_id = artifact.id
+        source_snapshot = (extraction.status, extraction.text_content, extraction.character_count)
+        artifact_snapshot = (artifact.sha256, artifact.storage_key, artifact.byte_size)
+
+    ConcurrentClassifier.barrier = threading.Barrier(2)
+    app.dependency_overrides[get_document_classifier] = ConcurrentClassifier
+    app.dependency_overrides[get_document_structured_extractor] = LocalStubDocumentStructuredExtractor
+
+    def process():
+        with TestClient(app) as client:
+            return client.post(f"/document-extractions/{extraction_id}/process", json={})
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(executor.map(lambda _: process(), range(2)))
+    finally:
+        app.dependency_overrides.clear()
+
+    assert [response.status_code for response in responses] == [201, 201]
+    payloads = [response.json() for response in responses]
+    assert sorted(payload["reused"] for payload in payloads) == [False, True]
+    assert len({payload["work_item"]["id"] for payload in payloads}) == 1
+    assert len({payload["review_id"] for payload in payloads}) == 1
+
+    with Session(get_engine()) as session:
+        classifications = list(session.scalars(select(DocumentClassification).where(DocumentClassification.document_extraction_id == extraction_id)))
+        structured = list(session.scalars(select(DocumentStructuredExtraction).where(DocumentStructuredExtraction.document_extraction_id == extraction_id)))
+        items = list(session.scalars(select(WorkItem).where(WorkItem.document_structured_extraction_id.in_([row.id for row in structured]))))
+        transitions = list(session.scalars(select(WorkItemTransition).where(WorkItemTransition.work_item_id.in_([row.id for row in items]))))
+        reviews = list(session.scalars(select(WorkItemReview).where(WorkItemReview.work_item_id.in_([row.id for row in items]))))
+        assert len(classifications) == len(structured) == len(items) == len(transitions) == len(reviews) == 1
+        assert payloads[0]["work_item"]["id"] == str(items[0].id)
+        assert payloads[0]["review_id"] == str(reviews[0].id)
+        source = session.get(DocumentExtraction, extraction_id)
+        source_artifact = session.get(IntakeArtifact, artifact_id)
+        assert (source.status, source.text_content, source.character_count) == source_snapshot
+        assert (source_artifact.sha256, source_artifact.storage_key, source_artifact.byte_size) == artifact_snapshot
+
+        session.execute(delete(WorkItemReview).where(WorkItemReview.work_item_id == items[0].id))
+        session.execute(delete(WorkItemTransition).where(WorkItemTransition.work_item_id == items[0].id))
+        session.execute(delete(WorkItem).where(WorkItem.id == items[0].id))
+        session.execute(delete(DocumentStructuredExtraction).where(DocumentStructuredExtraction.document_extraction_id == extraction_id))
+        session.execute(delete(DocumentClassification).where(DocumentClassification.document_extraction_id == extraction_id))
+        session.execute(delete(DocumentExtraction).where(DocumentExtraction.id == extraction_id))
+        session.execute(delete(IntakeArtifact).where(IntakeArtifact.id == artifact_id))
+        session.execute(delete(IntakeEvent).where(IntakeEvent.subject == subject))
         session.execute(delete(WorkflowDefinition).where(WorkflowDefinition.name == "generic_document_review"))
         session.commit()

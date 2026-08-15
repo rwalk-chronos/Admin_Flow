@@ -68,6 +68,14 @@ window.ManualIntake = (() => {
     return status === "partial" || status === "needs_ocr";
   }
 
+  function hasReadableText(extraction) {
+    return extraction.status === "extracted" || (
+      extraction.status === "partial"
+      && typeof extraction.text_content === "string"
+      && extraction.text_content.trim().length > 0
+    );
+  }
+
   function addFiles(incoming, host) {
     for (const file of incoming) {
       const duplicate = files.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified);
@@ -154,7 +162,7 @@ window.ManualIntake = (() => {
     progress.update("Running local OCR…");
     try {
       const ocr = await request(`/document-extractions/${extraction.id}/ocr`, { method: "POST" });
-      if (ocr.status === "extracted") {
+      if (hasReadableText(ocr)) {
         return processExtraction(ocr.id, progress);
       }
       if (ocr.status === "partial" || ocr.status === "needs_ocr") progress.update("Document received, but some text could not be processed", "failed");

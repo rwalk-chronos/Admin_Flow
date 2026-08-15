@@ -125,6 +125,30 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
     except (ClassificationProviderError, StructuredExtractionProviderError) as exc:
         session.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    locked_extraction = session.scalar(
+        select(DocumentExtraction)
+        .where(DocumentExtraction.id == extraction.id)
+        .with_for_update()
+    )
+    if locked_extraction is None:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Document extraction not found")
+    existing = _existing_result(session, locked_extraction.id)
+    if existing:
+        classification, structured, item, review = existing
+        session.rollback()
+        return {
+            "profile_id": request.profile_id,
+            "provider_name": classification.provider_name,
+            "reused": True,
+            "classification": classification,
+            "structured_extraction": structured,
+            "work_item": item,
+            "review_id": review.id,
+        }
+
+    extraction = locked_extraction
     workflow = ensure_generic_review_workflow(session)
     classification = DocumentClassification(document_extraction_id=extraction.id, candidate_labels=[item.model_dump(mode="json") for item in GENERIC_OFFICE.candidates], provider_name=classifier.provider_name, model_name=classifier.model_name, prompt_version=classifier.prompt_version, label=classified.label, confidence=classified.confidence, rationale=classified.rationale)
     session.add(classification); session.flush()
