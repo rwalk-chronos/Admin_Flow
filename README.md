@@ -282,3 +282,33 @@ curl -X POST \
 The deterministic transition engine verifies the exact allowed edge and uses `expected_state` plus `expected_version` to reject stale clients. WorkItem state/version and immutable transition history are committed atomically. Transition history is returned chronologically by version.
 
 Workflow state names are application-defined and domain-neutral; generic examples include `new`, `ready`, `in_progress`, `waiting`, `completed`, and `cancelled`. AI never chooses or changes workflow state. This foundation does not yet implement actions, timers, permissions, authentication, or human approval behavior.
+
+## Human review queue
+
+Workflow states may set `review_required: true`. Transitions leaving such a state map the deterministic human decisions `approve` and optionally `reject` to fixed target states through `review_decision`; callers cannot choose an arbitrary post-review state.
+
+When a WorkItem enters a review-required state, AdminFlow creates a pending immutable-version review record in the same transaction as the WorkItem transition. Normal transition requests cannot leave that state. Pending work is listed oldest first:
+
+```bash
+curl 'http://localhost:8000/work-item-reviews?status=pending'
+curl http://localhost:8000/work-items/WORK_ITEM_ID/reviews
+```
+
+Resolve a review with an application-supplied reviewer audit identifier and optimistic state/version guard:
+
+```bash
+curl -X POST \
+  http://localhost:8000/work-item-reviews/REVIEW_ID/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "decision": "approve",
+    "expected_work_item_state": "human_review",
+    "expected_work_item_version": 2,
+    "reviewer": "reviewer-1",
+    "notes": "Reviewed and approved"
+  }'
+```
+
+Approval may include corrected `reviewed_data`. For WorkItems backed by a `DocumentStructuredExtraction`, corrections are deterministically validated against its exact persisted field schema; the immutable source extraction is never changed. Rejection never changes WorkItem data. Review resolution locks the WorkItem, uses the existing deterministic transition engine, and atomically persists the decision, WorkItem state/version, and immutable transition history.
+
+The reviewer value is an application-supplied audit identifier in this V1 foundation. Authentication, RBAC, notifications, timers, actions, and a human-review frontend are not implemented. AI never approves, rejects, or changes workflow state.

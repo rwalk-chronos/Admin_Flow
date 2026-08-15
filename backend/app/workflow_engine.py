@@ -53,6 +53,35 @@ def validate_workflow_graph(
     if any(from_state in terminal_states for from_state, _ in pairs):
         raise WorkflowDefinitionError("terminal states cannot have outgoing transitions")
 
+    state_map = {state.name: state for state in states}
+    if any(state.terminal and state.review_required for state in states):
+        raise WorkflowDefinitionError("terminal states cannot require review")
+    decisions_by_state: dict[str, list[str]] = defaultdict(list)
+    for edge in transitions:
+        source_requires_review = state_map[edge.from_state].review_required
+        if source_requires_review and edge.review_decision is None:
+            raise WorkflowDefinitionError(
+                "transitions leaving a review state require review_decision"
+            )
+        if not source_requires_review and edge.review_decision is not None:
+            raise WorkflowDefinitionError(
+                "transitions leaving a normal state cannot have review_decision"
+            )
+        if edge.review_decision is not None:
+            decisions_by_state[edge.from_state].append(edge.review_decision)
+    for state in states:
+        if not state.review_required:
+            continue
+        decisions = decisions_by_state[state.name]
+        if decisions.count("reject") > 1 or len(decisions) != len(set(decisions)):
+            raise WorkflowDefinitionError(
+                "review decisions from a state must be unique"
+            )
+        if decisions.count("approve") != 1:
+            raise WorkflowDefinitionError(
+                "review states require exactly one approve transition"
+            )
+
     adjacency: dict[str, set[str]] = defaultdict(set)
     reverse: dict[str, set[str]] = defaultdict(set)
     for from_state, to_state in pairs:
@@ -97,6 +126,7 @@ def apply_transition(
     expected_state: str,
     expected_version: int,
     to_state: str,
+    allow_review: bool = False,
 ) -> TransitionResult:
     if expected_state != work_item.current_state:
         raise WorkflowTransitionConflict("WorkItem state has changed")
@@ -105,7 +135,11 @@ def apply_transition(
 
     state_map = {state["name"]: state for state in workflow.states}
     current_definition = state_map[work_item.current_state]
-    if current_definition["terminal"]:
+    if current_definition.get("review_required", False) and not allow_review:
+        raise WorkflowTransitionConflict(
+            "Human review is required for the current state"
+        )
+    if current_definition.get("terminal", False):
         raise WorkflowTransitionConflict("Terminal WorkItems cannot transition")
     if to_state not in state_map:
         raise WorkflowTransitionConflict("Target state is not defined by the workflow")

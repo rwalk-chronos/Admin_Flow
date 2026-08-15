@@ -172,12 +172,14 @@ class WorkflowStateDefinition(BaseModel):
     name: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
     description: str | None = Field(default=None, max_length=500)
     terminal: bool = False
+    review_required: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class WorkflowTransitionDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     from_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
     to_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    review_decision: Literal["approve", "reject"] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class WorkflowDefinitionCreate(BaseModel):
@@ -260,3 +262,41 @@ class WorkItemTransitionResponse(BaseModel):
     to_state: str
     reason: str | None
     created_at: datetime
+
+ReviewStatus = Literal["pending", "approved", "rejected"]
+ReviewDecision = Literal["approve", "reject"]
+
+
+class WorkItemReviewResolve(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: ReviewDecision
+    expected_work_item_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    expected_work_item_version: int = Field(ge=1)
+    reviewer: str = Field(min_length=1, max_length=255)
+    notes: str | None = Field(default=None, max_length=2000)
+    reviewed_data: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def reviewer_must_not_be_blank(self) -> "WorkItemReviewResolve":
+        if not self.reviewer.strip():
+            raise ValueError("reviewer must not be blank")
+        return self
+
+
+class WorkItemReviewResponse(BaseModel):
+    id: uuid.UUID
+    work_item_id: uuid.UUID
+    work_item_version: int
+    state: str
+    status: ReviewStatus
+    reviewer: str | None
+    notes: str | None
+    reviewed_data: dict[str, Any] | None
+    created_at: datetime
+    resolved_at: datetime | None
+    work_type: str
+    title: str
+    current_state: str
+    current_version: int
+    work_item_data: dict[str, Any]

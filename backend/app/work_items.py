@@ -23,6 +23,7 @@ from app.schemas import (
     WorkflowDefinitionResponse,
 )
 from app.workflow_engine import WorkflowTransitionConflict, apply_transition
+from app.work_item_reviews import create_pending_review_if_required, state_requires_review
 
 
 router = APIRouter()
@@ -146,6 +147,7 @@ def create_work_item(
             reason=None,
         )
     )
+    create_pending_review_if_required(session, item, workflow)
     session.commit()
     session.refresh(item)
     return item
@@ -185,6 +187,12 @@ def transition_work_item(
     if item is None:
         raise HTTPException(status_code=404, detail="WorkItem not found")
     workflow = session.get(WorkflowDefinition, item.workflow_definition_id)
+    if state_requires_review(workflow, item.current_state):
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Human review is required for the current state",
+        )
     try:
         result = apply_transition(
             item,
@@ -205,6 +213,7 @@ def transition_work_item(
         reason=request.reason,
     )
     session.add(transition)
+    create_pending_review_if_required(session, item, workflow)
     session.commit()
     session.refresh(transition)
     return transition

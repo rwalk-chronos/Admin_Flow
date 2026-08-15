@@ -11,6 +11,7 @@ from app.document_ocr_api import router as document_ocr_router
 from app.intake_artifacts import router as intake_artifacts_router
 from app.intake_events import router as intake_events_router
 from app.work_items import router as work_items_router
+from app.work_item_reviews import router as work_item_reviews_router
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
@@ -21,6 +22,7 @@ app.include_router(document_ocr_router)
 app.include_router(intake_artifacts_router)
 app.include_router(intake_events_router)
 app.include_router(work_items_router)
+app.include_router(work_item_reviews_router)
 
 
 @app.get("/health")
