@@ -327,29 +327,26 @@ PR #7 was merged to `main` as `3f5ab13372fa8942c0460f2c9bc2b99bb7ad7b26` after f
 
 PR #8 was merged to `main` as `8c99a49549f58ae65fb0bc389aed746f39c6bb8f` after final GitHub Actions validation passed with 113 tests, 0 skipped, and 0 failed. All four PostgreSQL workflow integration tests executed and passed, and Alembic upgraded through `20260814_0008`. Workflow-state decisions remain deterministic and no human-review functionality was added.
 
-### Real document validation
+### Prior real-document OCR validation
 
-A real `Condenser Pump Down` PDF was used to validate both extraction paths.
+A real `Condenser Pump Down` PDF was previously used to compare native extraction with an image-only OCR path. The original native-text PDF produced one page, 1,157 characters, `status="extracted"`, and `needs_ocr=false`. Tesseract recovered 1,152 characters from the image-only copy with 84.86% whole-string similarity to the native reference. The recovered text was readable and usable; visible header text, list numbering, whitespace, and layout accounted for accepted differences. Layout interpretation remains deferred to a later document-understanding layer.
 
-Original PDF with native text:
+### Live OpenAI end-to-end document validation
 
-```text
-pages: 1
-characters: 1157
-status: extracted
-needs_ocr: false
-```
+The first successful live OpenAI end-to-end document validation was completed on 2026-08-15 using `Condenser Pump Down - Image Only.pdf`.
 
-An image-only copy of the same document correctly produced no native text and was routed to OCR. Tesseract recovered:
+The validation chain completed successfully:
 
-```text
-OCR characters: 1152
-SequenceMatcher whole-string similarity to native reference: 84.86%
-```
+1. An `IntakeEvent` was created.
+2. The image-only PDF was uploaded as an immutable `IntakeArtifact`.
+3. Native PDF extraction produced `extraction_method="pdf_text"`, `status="needs_ocr"`, and `character_count=0`.
+4. Selective OCR produced extraction `ae652b56-d965-47e7-a08d-dee227a6a8f4`, derived from native extraction `b8421354-4a63-441c-ab0e-6088388a3c28`, with `extraction_method="pdf_text_ocr"`, `status="extracted"`, `page_count=1`, and `character_count=1152`.
+5. Live OpenAI document classification produced immutable classification `2e0db52a-30dc-4734-860b-e97131bc2a31` using provider `openai`, model `gpt-5-mini`, and prompt version `document-classification-v1`. The selected result was `procedure` with confidence `0.99`.
+6. Live OpenAI structured extraction produced immutable result `4264feb5-cfa3-4083-8da2-126fe42845a6` using provider `openai`, model `gpt-5-mini`, and prompt version `document-structured-extraction-v1`. Classification lineage was preserved and the structured data persisted successfully.
+7. Extracted fields included `title`, `safety_precautions`, `ppe_items`, `procedure_steps`, `tools_or_equipment`, and `completion_note`.
+8. Persistence was verified through successful classification and structured-extraction GET requests.
 
-The recovered text was clearly readable and usable. Differences included visible header text found by OCR, list-numbering differences, and whitespace/layout differences. Layout/list interpretation is intentionally deferred to a later document-understanding layer.
-
-A live external-model classification of the real document has not yet been recorded as part of this status file; the classification feature is currently verified through deterministic API/provider tests and PostgreSQL integration with injected classifiers.
+The OCR source contained minor recognition noise, but structured extraction correctly identified the meaningful procedure steps. The original artifact, native extraction, and OCR extraction remained immutable. AI did not control or alter workflow state, and no workflow transition was performed by AI.
 
 ## V1 progress estimate
 
