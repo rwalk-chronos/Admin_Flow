@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db import get_engine
@@ -12,7 +12,7 @@ from app.document_classifier import LocalStubDocumentClassifier
 from app.document_structured_extractions import get_document_structured_extractor
 from app.document_structured_extractor import LocalStubDocumentStructuredExtractor
 from app.main import app
-from app.models import DocumentExtraction, IntakeArtifact, IntakeEvent, WorkItem, WorkItemReview, WorkItemTransition
+from app.models import DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
 
 pytestmark = pytest.mark.integration
 
@@ -43,3 +43,13 @@ def test_postgresql_complete_stub_pipeline_atomic_lineage_and_idempotency():
         assert len(list(session.scalars(select(WorkItemTransition).where(WorkItemTransition.work_item_id == item.id)))) == 1
         review = session.scalar(select(WorkItemReview).where(WorkItemReview.work_item_id == item.id))
         assert review.status == "pending" and review.state == "needs_review"
+        session.execute(delete(WorkItemReview).where(WorkItemReview.work_item_id == item.id))
+        session.execute(delete(WorkItemTransition).where(WorkItemTransition.work_item_id == item.id))
+        session.execute(delete(WorkItem).where(WorkItem.id == item.id))
+        session.execute(delete(DocumentStructuredExtraction).where(DocumentStructuredExtraction.document_extraction_id == extraction_id))
+        session.execute(delete(DocumentClassification).where(DocumentClassification.document_extraction_id == extraction_id))
+        session.execute(delete(DocumentExtraction).where(DocumentExtraction.id == extraction_id))
+        session.execute(delete(IntakeArtifact).where(IntakeArtifact.storage_key == "integration/dual-mode-pipeline"))
+        session.execute(delete(IntakeEvent).where(IntakeEvent.subject == "PostgreSQL pipeline"))
+        session.execute(delete(WorkflowDefinition).where(WorkflowDefinition.name == "generic_document_review"))
+        session.commit()
