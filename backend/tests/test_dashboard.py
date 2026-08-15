@@ -71,6 +71,10 @@ def test_manual_intake_wires_existing_processing_apis_deterministically() -> Non
     assert 'request(`/intake-artifacts/${artifact.id}/extract`' in source
     assert 'request(`/document-extractions/${extraction.id}/ocr`' in source
     assert 'status === "partial" || status === "needs_ocr"' in source
+    assert 'extraction.status === "partial"' in source
+    assert 'typeof extraction.text_content === "string"' in source
+    assert "extraction.text_content.trim().length > 0" in source
+    assert "if (hasReadableText(ocr))" in source
     assert "document-extractions/${extraction.id}/classifications" not in source
     assert "structured-extractions" not in source
     assert "OpenAI" not in source
@@ -86,3 +90,15 @@ def test_manual_intake_uses_native_multiple_file_input_and_accessible_status() -
     assert '"aria-live": "polite"' in source
     assert 'event.dataTransfer.files' in source
     assert 'Select at least one document.' in source
+
+
+def test_manual_intake_uses_server_owned_processing_profile_and_review_routing() -> None:
+    source = (Path(__file__).parents[1] / "app" / "static" / "manual-intake.js").read_text(encoding="utf-8")
+    assert 'request("/document-processing/config")' in source
+    assert '`/document-extractions/${extractionId}/process`' in source
+    assert 'profile_id: "generic_office"' in source
+    assert '"review/" + reviewIds[0]' in source
+    assert "candidate_labels" not in source
+    assert "field_schema" not in source
+    assert "workflow_definition" not in source
+    assert "provider-select" not in source

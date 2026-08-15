@@ -455,10 +455,12 @@ async function intakeDetail(id) {
   content.append(element("div", { className: "loading-state", text: "Loading intake event…" }));
   const [event, artifacts] = await Promise.all([api(`/intake-events/${id}`), api(`/intake-events/${id}/artifacts`)]);
   const extractionLists = await Promise.all(artifacts.map((artifact) => api(`/intake-artifacts/${artifact.id}/extractions`)));
+  const relatedItems = (await api("/work-items")).filter((item) => item.intake_event_id === id);
+  const relatedReviews = await Promise.all(relatedItems.map((item) => api(`/work-items/${item.id}/reviews`)));
   clear();
   content.append(pageHeader("Intake event", event.subject || titleCase(event.source_type), "Source details and immutable attachments.", element("a", { className: "button secondary", text: "Back to intake", href: "#intake" })));
   const details = element("section", { className: "card" }, [element("div", { className: "card-header" }, [element("h2", { text: "Event details" }), badge(event.status)]), element("div", { className: "card-body" }, [element("dl", { className: "detail-grid" }, [detailItem("Received", formatDate(event.received_at)), detailItem("Source type", titleCase(event.source_type)), detailItem("Sender", event.sender), detailItem("Recipient", event.recipient), detailItem("External ID", event.external_id), detailItem("Attachments", artifacts.length)]), event.body_text ? element("div", {}, [element("h3", { text: "Body text" }), element("pre", { className: "data-view", text: event.body_text })]) : null])]);
-  content.append(element("div", { className: "section-stack" }, [details, window.ManualIntake.artifactStatusList(artifacts, extractionLists), attachmentPane(artifacts)]));
+  content.append(element("div", { className: "section-stack" }, [details, window.ManualIntake.relatedWorkList(relatedItems, relatedReviews), window.ManualIntake.artifactStatusList(artifacts, extractionLists), attachmentPane(artifacts)]));
 }
 
 async function route() {

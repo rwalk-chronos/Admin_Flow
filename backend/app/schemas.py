@@ -300,3 +300,30 @@ class WorkItemReviewResponse(BaseModel):
     current_state: str
     current_version: int
     work_item_data: dict[str, Any]
+
+class DocumentProcessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    profile_id: Literal["generic_office"] = "generic_office"
+
+
+class DocumentProcessingProfileResponse(BaseModel):
+    id: str
+    display_name: str
+
+
+class DocumentProcessingConfigResponse(BaseModel):
+    provider: Literal["stub", "openai"]
+    provider_display_name: str
+    uses_external_service: bool
+    configured: bool
+    profiles: list[DocumentProcessingProfileResponse]
+
+
+class DocumentProcessResponse(BaseModel):
+    profile_id: str
+    provider_name: str
+    reused: bool
+    classification: DocumentClassificationResponse
+    structured_extraction: DocumentStructuredExtractionResponse
+    work_item: WorkItemResponse
+    review_id: uuid.UUID

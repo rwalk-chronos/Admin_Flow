@@ -117,3 +117,22 @@ class OpenAIDocumentClassifier:
             confidence=parsed.confidence,
             rationale=rationale,
         )
+
+class LocalStubDocumentClassifier:
+    provider_name = "local_stub"
+    model_name = "deterministic-stub-v1"
+    prompt_version = "document-classification-stub-v1"
+
+    def classify(self, *, text: str, candidate_labels: list[ClassificationCandidate]) -> ClassificationResult:
+        normalized = " ".join(text.casefold().split())
+        scores = [normalized.count(candidate.name.strip().casefold()) for candidate in candidate_labels]
+        strongest = max(scores, default=0)
+        if strongest:
+            index = scores.index(strongest)
+            rationale = f"Deterministic text match for candidate '{candidate_labels[index].name}'."
+            confidence = min(0.99, 0.7 + strongest * 0.05)
+        else:
+            index = next((i for i, item in enumerate(candidate_labels) if item.name.strip().casefold() in {"other", "unknown"}), len(candidate_labels) - 1)
+            rationale = f"No explicit candidate-name match; deterministic fallback to '{candidate_labels[index].name}'."
+            confidence = 0.25
+        return ClassificationResult(candidate_labels[index].name, confidence, rationale)

@@ -338,3 +338,24 @@ From the dashboard Intake screen, select **+ New Intake** to create a domain-neu
 Files are uploaded sequentially through the existing IntakeArtifact API and preserved unchanged in local artifact storage. PDF candidates proceed through native text extraction; pages marked `partial` or `needs_ocr` then use selective local Tesseract OCR. Non-PDF files are safely preserved without invoking PDF processing. Per-file progress distinguishes upload, receipt, extraction, local OCR, readiness, unavailable processing, and partial failure.
 
 Manual intake invokes no classifier, structured extractor, OpenAI adapter, or other external model. It is a local proof-of-concept input path built on the universal intake/artifact engine, not a production intake connector. Successfully stored originals are retained if later text processing fails.
+
+## Dual-mode document processing
+
+AdminFlow defaults to fully local deterministic processing:
+
+```dotenv
+AI_PROVIDER=stub
+```
+
+The local stub makes no external requests. It deterministically matches the application-owned `generic_office` taxonomy (`invoice`, `correspondence`, `form`, or `other`) and extracts ordinary labeled fields using the profile's constrained field definitions.
+
+To use the existing OpenAI Responses API adapters instead:
+
+```dotenv
+AI_PROVIDER=openai
+OPENAI_API_KEY=your-key-here
+```
+
+OpenAI mode still leaves taxonomy, field schemas, title construction, WorkItem creation, workflow state, and approve/reject routing under deterministic application control. Providers receive extracted text—not original artifact bytes.
+
+`POST /document-extractions/{id}/process` runs the selected provider through classification and structured extraction, then atomically creates the derived records, WorkItem, initial transition, and pending human review for the `generic_office` profile. Repeating the request reuses its existing result. `GET /document-processing/config` exposes only non-secret provider readiness and available profile display information.

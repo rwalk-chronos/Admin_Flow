@@ -68,6 +68,14 @@ window.ManualIntake = (() => {
     return status === "partial" || status === "needs_ocr";
   }
 
+  function hasReadableText(extraction) {
+    return extraction.status === "extracted" || (
+      extraction.status === "partial"
+      && typeof extraction.text_content === "string"
+      && extraction.text_content.trim().length > 0
+    );
+  }
+
   function addFiles(incoming, host) {
     for (const file of incoming) {
       const duplicate = files.some((item) => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified);
@@ -99,6 +107,19 @@ window.ManualIntake = (() => {
     };
   }
 
+  async function processExtraction(extractionId, progress) {
+    progress.update("Organizing document…");
+    try {
+      const result = await request(`/document-extractions/${extractionId}/process`, { method: "POST", body: JSON.stringify({ profile_id: "generic_office" }) });
+      progress.update("Ready for review", "ready");
+      return { ok: true, reviewId: result.review_id };
+    } catch (error) {
+      const message = error.status === 503 ? "Document received, but document processing is not configured." : "Document received, but document processing could not be completed.";
+      progress.update(message, "failed");
+      return { ok: false };
+    }
+  }
+
   async function processFile(eventId, file, progress) {
     progress.update("Uploading");
     const body = new FormData();
@@ -108,11 +129,11 @@ window.ManualIntake = (() => {
       artifact = await request(`/intake-events/${eventId}/artifacts`, { method: "POST", body });
     } catch (error) {
       progress.update(`Upload failed — ${error.message}`, "failed");
-      return false;
+      return { ok: false };
     }
     if (!isPdfFile(file)) {
       progress.update("Received — text processing is not available for this file type", "unavailable");
-      return true;
+      return { ok: true };
     }
     progress.update("Extracting text");
     let extraction;
@@ -121,37 +142,35 @@ window.ManualIntake = (() => {
     } catch (error) {
       if (error.status === 415) progress.update("Received — text processing is not supported for this file", "unavailable");
       else progress.update(`Document received, but text processing could not be completed — ${error.message}`, "failed");
-      return false;
+      return { ok: false };
     }
     if (extraction.status === "extracted") {
-      progress.update("Ready — text extracted", "ready");
-      return true;
+      return processExtraction(extraction.id, progress);
     }
     if (extraction.status === "password_required") {
       progress.update("Document received. PDF password is required before text can be processed.", "unavailable");
-      return false;
+      return { ok: false };
     }
     if (extraction.status === "failed") {
       progress.update("Document received, but text processing could not be completed", "failed");
-      return false;
+      return { ok: false };
     }
     if (!shouldRunOcr(extraction.status)) {
       progress.update(`Document received — ${extraction.status}`, "unavailable");
-      return false;
+      return { ok: false };
     }
     progress.update("Running local OCR…");
     try {
       const ocr = await request(`/document-extractions/${extraction.id}/ocr`, { method: "POST" });
-      if (ocr.status === "extracted") {
-        progress.update("Ready — local OCR extracted text", "ready");
-        return true;
+      if (hasReadableText(ocr)) {
+        return processExtraction(ocr.id, progress);
       }
       if (ocr.status === "partial" || ocr.status === "needs_ocr") progress.update("Document received, but some text could not be processed", "failed");
       else progress.update("Document received, but text processing could not be completed", "failed");
-      return false;
+      return { ok: false };
     } catch (error) {
       progress.update(`Document received, but text processing could not be completed — ${error.message}`, "failed");
-      return false;
+      return { ok: false };
     }
   }
 
@@ -177,7 +196,9 @@ window.ManualIntake = (() => {
       el("fieldset", { className: "file-fieldset" }, [el("legend", { text: "Documents" }), input, drop, selected]),
       progressHost, eventLink, el("div", { className: "action-row" }, [cancel, submit]),
     );
-    content.append(heading, form);
+    const providerStatus = el("p", { className: "provider-status", text: "Document processing: Loading…" });
+    content.append(heading, providerStatus, form);
+    request("/document-processing/config").then((config) => { providerStatus.textContent = "Document processing: " + config.provider_display_name + (config.configured ? "" : " — not configured"); }).catch(() => { providerStatus.textContent = "Document processing: Configuration unavailable"; });
     renderFiles(selected);
     input.addEventListener("change", () => { addFiles(input.files, selected); input.value = ""; });
     drop.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); input.click(); } });
@@ -206,12 +227,20 @@ window.ManualIntake = (() => {
         return;
       }
       let complete = true;
-      for (let index = 0; index < selectedFiles.length; index += 1) if (!await processFile(intakeEvent.id, selectedFiles[index], rows[index])) complete = false;
+      const reviewIds = [];
+      for (let index = 0; index < selectedFiles.length; index += 1) {
+        const outcome = await processFile(intakeEvent.id, selectedFiles[index], rows[index]);
+        if (!outcome.ok) complete = false;
+        if (outcome.reviewId) {
+          reviewIds.push(outcome.reviewId);
+          eventLink.append(el("a", { className: "button secondary", text: "Review " + selectedFiles[index].name, href: "#review/" + outcome.reviewId }));
+        }
+      }
       eventLink.append(el("a", { className: "button secondary", text: "Open IntakeEvent", href: `#intake/${intakeEvent.id}` }));
       if (complete) {
         notify("Intake received and document processing completed.");
         files = [];
-        window.setTimeout(() => { window.location.hash = `intake/${intakeEvent.id}`; }, 700);
+        window.setTimeout(() => { window.location.hash = selectedFiles.length === 1 && reviewIds.length === 1 ? "review/" + reviewIds[0] : "intake/" + intakeEvent.id; }, 700);
       } else {
         notify("Intake was created, but one or more documents need attention.", true);
       }
@@ -240,5 +269,13 @@ window.ManualIntake = (() => {
     return card;
   }
 
-  return { render, clearFiles() { files = []; }, shouldRunOcr, artifactStatusList };
+  function relatedWorkList(items, reviewLists) {
+    const card = el("section", { className: "card" }, [el("div", { className: "card-header" }, [el("h2", { text: "Related work" })])]);
+    if (!items.length) { card.append(el("div", { className: "empty-state", text: "No related WorkItems." })); return card; }
+    const list = el("ul", { className: "list" });
+    items.forEach((item, index) => { const pending = reviewLists[index].find((review) => review.status === "pending"); list.append(el("li", { className: "list-row" }, [el("div", {}, [el("strong", { text: item.title }), el("div", { className: "row-meta" }, [el("span", { text: item.work_type }), el("span", { text: item.current_state }), el("span", { text: "Version " + item.version })])]), pending ? el("a", { className: "button", text: "Review", href: "#review/" + pending.id }) : null])); });
+    card.append(list); return card;
+  }
+
+  return { render, clearFiles() { files = []; }, shouldRunOcr, artifactStatusList, relatedWorkList };
 })();
