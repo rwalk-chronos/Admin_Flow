@@ -17,12 +17,15 @@ def test_dashboard_and_local_assets_are_served() -> None:
     with TestClient(app) as client:
         page = client.get("/app/")
         script = client.get("/app/app.js")
+        manual_intake = client.get("/app/manual-intake.js")
         stylesheet = client.get("/app/styles.css")
 
     assert page.status_code == 200
     assert "AdminFlow" in page.text
     assert script.status_code == 200
     assert script.headers["content-type"].startswith("text/javascript")
+    assert manual_intake.status_code == 200
+    assert manual_intake.headers["content-type"].startswith("text/javascript")
     assert stylesheet.status_code == 200
     assert stylesheet.headers["content-type"].startswith("text/css")
 
@@ -54,3 +57,32 @@ def test_frontend_has_no_external_or_unsafe_rendering_dependencies() -> None:
     assert "localStorage" not in (static_directory / "index.html").read_text()
     assert "localStorage" not in (static_directory / "styles.css").read_text()
     assert sources.count("localStorage") == 2
+
+
+def test_manual_intake_wires_existing_processing_apis_deterministically() -> None:
+    source = (
+        Path(__file__).parents[1] / "app" / "static" / "manual-intake.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'source_type: "manual_upload"' in source
+    assert "new FormData()" in source
+    assert 'body.append("file", file, file.name)' in source
+    assert 'request(`/intake-events/${eventId}/artifacts`' in source
+    assert 'request(`/intake-artifacts/${artifact.id}/extract`' in source
+    assert 'request(`/document-extractions/${extraction.id}/ocr`' in source
+    assert 'status === "partial" || status === "needs_ocr"' in source
+    assert "document-extractions/${extraction.id}/classifications" not in source
+    assert "structured-extractions" not in source
+    assert "OpenAI" not in source
+
+
+def test_manual_intake_uses_native_multiple_file_input_and_accessible_status() -> None:
+    source = (
+        Path(__file__).parents[1] / "app" / "static" / "manual-intake.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'type: "file"' in source
+    assert 'multiple: ""' in source
+    assert '"aria-live": "polite"' in source
+    assert 'event.dataTransfer.files' in source
+    assert 'Select at least one document.' in source

@@ -438,7 +438,7 @@ function historyCard(title, entries) {
 async function intake() {
   setActiveNav("intake");
   clear();
-  content.append(pageHeader("Sources", "Intake", "Recent incoming events and their preserved source artifacts."), element("div", { className: "card loading-state", text: "Loading intake…" }));
+  content.append(pageHeader("Sources", "Intake", "Recent incoming events and their preserved source artifacts.", element("a", { className: "button", text: "+ New Intake", href: "#new-intake" })), element("div", { className: "card loading-state", text: "Loading intake…" }));
   const events = await api("/intake-events");
   const artifactLists = await Promise.all(events.map((event) => api(`/intake-events/${event.id}/artifacts`)));
   content.lastElementChild.remove();
@@ -454,17 +454,20 @@ async function intakeDetail(id) {
   clear();
   content.append(element("div", { className: "loading-state", text: "Loading intake event…" }));
   const [event, artifacts] = await Promise.all([api(`/intake-events/${id}`), api(`/intake-events/${id}/artifacts`)]);
+  const extractionLists = await Promise.all(artifacts.map((artifact) => api(`/intake-artifacts/${artifact.id}/extractions`)));
   clear();
   content.append(pageHeader("Intake event", event.subject || titleCase(event.source_type), "Source details and immutable attachments.", element("a", { className: "button secondary", text: "Back to intake", href: "#intake" })));
   const details = element("section", { className: "card" }, [element("div", { className: "card-header" }, [element("h2", { text: "Event details" }), badge(event.status)]), element("div", { className: "card-body" }, [element("dl", { className: "detail-grid" }, [detailItem("Received", formatDate(event.received_at)), detailItem("Source type", titleCase(event.source_type)), detailItem("Sender", event.sender), detailItem("Recipient", event.recipient), detailItem("External ID", event.external_id), detailItem("Attachments", artifacts.length)]), event.body_text ? element("div", {}, [element("h3", { text: "Body text" }), element("pre", { className: "data-view", text: event.body_text })]) : null])]);
-  content.append(element("div", { className: "section-stack" }, [details, attachmentPane(artifacts)]));
+  content.append(element("div", { className: "section-stack" }, [details, window.ManualIntake.artifactStatusList(artifacts, extractionLists), attachmentPane(artifacts)]));
 }
 
 async function route() {
   cleanupDocumentUrl();
   const [name = "dashboard", id] = window.location.hash.slice(1).split("/");
+  if (name !== "new-intake") window.ManualIntake.clearFiles();
   try {
-    if (name === "reviews") await reviewQueue();
+    if (name === "new-intake") await window.ManualIntake.render();
+    else if (name === "reviews") await reviewQueue();
     else if (name === "review" && id) await reviewDetail(id);
     else if (name === "work-items") await workItems();
     else if (name === "work-item" && id) await workItemDetail(id);

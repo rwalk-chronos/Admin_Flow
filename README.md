@@ -329,4 +329,12 @@ The dashboard provides:
 
 Approval and rejection use the existing deterministic review endpoint. The browser supplies the expected WorkItem state/version but never selects the target state. PDF files are fetched from local artifact storage as browser blobs and are not placed in URLs or browser storage. Only the reviewer convenience value is retained in local browser storage.
 
-There is no authentication yet, and the reviewer field is only an application-supplied audit identifier. There is also no upload interface in this slice; intake records and artifacts must already exist through the API. The next proof-of-concept slice will add a simple local/manual intake experience.
+There is no authentication yet, and the reviewer field is only an application-supplied audit identifier. The dashboard now includes a local manual-intake form; production connectors remain outside this proof-of-concept slice.
+
+## Manual intake
+
+From the dashboard Intake screen, select **+ New Intake** to create a domain-neutral `IntakeEvent` with `source_type="manual_upload"`. The form accepts optional subject, sender, and notes plus one or more local files through a native picker or drag and drop.
+
+Files are uploaded sequentially through the existing IntakeArtifact API and preserved unchanged in local artifact storage. PDF candidates proceed through native text extraction; pages marked `partial` or `needs_ocr` then use selective local Tesseract OCR. Non-PDF files are safely preserved without invoking PDF processing. Per-file progress distinguishes upload, receipt, extraction, local OCR, readiness, unavailable processing, and partial failure.
+
+Manual intake invokes no classifier, structured extractor, OpenAI adapter, or other external model. It is a local proof-of-concept input path built on the universal intake/artifact engine, not a production intake connector. Successfully stored originals are retained if later text processing fails.

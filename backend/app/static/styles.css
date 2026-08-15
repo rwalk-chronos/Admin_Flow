@@ -134,3 +134,30 @@ pre.data-view { margin: 0; padding: 16px; overflow: auto; border-radius: 7px; co
   .review-card .button { width: 100%; }
   .page-head { flex-direction: column; }
 }
+
+.manual-intake-form { max-width: 760px; padding: 24px; }
+.file-fieldset { margin: 0 0 20px; padding: 0; border: 0; }
+.file-fieldset legend { margin-bottom: 8px; font-size: .86rem; font-weight: 680; }
+.drop-zone { display: grid; place-items: center; min-height: 150px; padding: 24px; border: 2px dashed #9aabb7; border-radius: 9px; color: var(--muted); background: #f8fafb; cursor: pointer; text-align: center; }
+.drop-zone strong { color: var(--ink); font-size: 1.02rem; }
+.drop-zone:hover, .drop-zone.dragging { border-color: var(--blue); background: var(--blue-soft); }
+.selected-files, .processing-list, .artifact-status-list { margin: 14px 0 0; padding: 0; list-style: none; }
+.selected-file, .processing-row, .artifact-status-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.selected-file > div, .processing-row > div, .artifact-status-list li { min-width: 0; }
+.selected-file span, .processing-row span, .artifact-status-list span { display: block; overflow-wrap: anywhere; }
+.button.compact { min-height: 34px; padding: 5px 11px; font-size: .82rem; }
+.processing-panel:empty { display: none; }
+.processing-panel { margin: 20px 0; padding: 16px; border-radius: 8px; background: #f3f7f9; }
+.processing-panel h2 { margin: 0; font-size: 1rem; }
+.processing-status { max-width: 55%; color: var(--blue); font-size: .84rem; font-weight: 680; text-align: right; }
+.processing-status.ready { color: var(--green); }
+.processing-status.failed { color: var(--red); }
+.processing-status.unavailable { color: var(--amber); }
+.artifact-status-list { margin: 0; }
+.artifact-status-list li { align-items: flex-start; flex-direction: column; padding: 16px 20px; gap: 2px; }
+
+@media (max-width: 700px) {
+  .manual-intake-form { padding: 18px; }
+  .selected-file, .processing-row { align-items: flex-start; flex-direction: column; }
+  .processing-status { max-width: none; text-align: left; }
+}
