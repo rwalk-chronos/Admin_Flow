@@ -126,6 +126,8 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
         session.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    workflow = ensure_generic_review_workflow(session)
+
     locked_extraction = session.scalar(
         select(DocumentExtraction)
         .where(DocumentExtraction.id == extraction.id)
@@ -149,7 +151,6 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
         }
 
     extraction = locked_extraction
-    workflow = ensure_generic_review_workflow(session)
     classification = DocumentClassification(document_extraction_id=extraction.id, candidate_labels=[item.model_dump(mode="json") for item in GENERIC_OFFICE.candidates], provider_name=classifier.provider_name, model_name=classifier.model_name, prompt_version=classifier.prompt_version, label=classified.label, confidence=classified.confidence, rationale=classified.rationale)
     session.add(classification); session.flush()
     structured = DocumentStructuredExtraction(document_extraction_id=extraction.id, document_classification_id=classification.id, field_schema=[item.model_dump(mode="json") for item in fields], extracted_data=data, provider_name=extractor.provider_name, model_name=extractor.model_name, prompt_version=extractor.prompt_version)
