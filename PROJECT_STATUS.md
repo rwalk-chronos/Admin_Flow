@@ -4,17 +4,17 @@ Status captured: 2026-08-15
 
 ## Current state
 
-AdminFlow is implementing the WorkItem and deterministic workflow-engine slice on feature branch `feature/workitem-workflow-engine`, based on the clean structured-extraction foundation in `main`.
+AdminFlow is at a clean feature boundary with the WorkItem and deterministic workflow engine merged to `main` on top of the intake and document-processing foundations.
 
 Last feature merge:
 
-- PR #7 — `Add AI structured data extraction` — merged to `main`
-- merge commit `3f5ab13372fa8942c0460f2c9bc2b99bb7ad7b26`
-- final GitHub Actions validation: 86 passed, 0 skipped, and 0 failed
-- PostgreSQL integration tests ran and passed
-- Alembic upgraded through `20260814_0007`
+- PR #8 — `Add deterministic WorkItem workflow engine` — merged to `main`
+- merge commit `8c99a49549f58ae65fb0bc389aed746f39c6bb8f`
+- final GitHub Actions validation: 113 passed, 0 skipped, and 0 failed
+- all four PostgreSQL workflow integration tests ran and passed
+- Alembic upgraded through `20260814_0008`
 
-Estimated V1 completion on this validated feature branch: **~73%**.
+Estimated V1 completion: **~73%**.
 
 **Next: Human review / approval queue.**
 
@@ -323,6 +323,10 @@ Classification tests use injected stub/fake providers and do not require an exte
 
 PR #7 was merged to `main` as `3f5ab13372fa8942c0460f2c9bc2b99bb7ad7b26` after final GitHub Actions validation passed with 86 tests, 0 skipped, and 0 failed. PostgreSQL integration tests executed and passed, including both structured-extraction integration tests, and Alembic upgraded through `20260814_0007`. Automated validation made no external OpenAI request.
 
+### WorkItem + deterministic workflow engine
+
+PR #8 was merged to `main` as `8c99a49549f58ae65fb0bc389aed746f39c6bb8f` after final GitHub Actions validation passed with 113 tests, 0 skipped, and 0 failed. All four PostgreSQL workflow integration tests executed and passed, and Alembic upgraded through `20260814_0008`. Workflow-state decisions remain deterministic and no human-review functionality was added.
+
 ### Real document validation
 
 A real `Condenser Pump Down` PDF was used to validate both extraction paths.
@@ -364,7 +368,7 @@ A live external-model classification of the real document has not yet been recor
 | First real intake connector | 4% | Not started |
 | Pilot polish / configuration | 3% | Not started |
 
-Current weighted completion on this feature branch: **~73%**.
+Current weighted completion: **~73%**.
 
 ## Not implemented yet
 
@@ -378,7 +382,7 @@ The repository does **not** yet contain:
 
 ## Next feature: Human review / approval queue
 
-After this feature is merged, the next slice should build human review and approval behavior on the deterministic WorkItem foundation. No human-review or approval-queue functionality exists yet.
+The next slice should build human review and approval behavior on the deterministic WorkItem foundation. No human-review or approval-queue functionality exists yet.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 
