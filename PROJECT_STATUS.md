@@ -1,10 +1,10 @@
 # AdminFlow Project Status
 
-Status captured: 2026-08-14
+Status captured: 2026-08-15
 
 ## Current state
 
-AdminFlow is at a clean feature boundary with AI structured data extraction merged to `main` on top of the classification and document-reading foundations.
+AdminFlow is implementing the WorkItem and deterministic workflow-engine slice on feature branch `feature/workitem-workflow-engine`, based on the clean structured-extraction foundation in `main`.
 
 Last feature merge:
 
@@ -14,9 +14,9 @@ Last feature merge:
 - PostgreSQL integration tests ran and passed
 - Alembic upgraded through `20260814_0007`
 
-Estimated V1 completion: **~58%**.
+Estimated V1 completion on this validated feature branch: **~73%**.
 
-**Next: WorkItem + deterministic workflow engine.**
+**Next: Human review / approval queue.**
 
 ## Product architecture
 
@@ -60,7 +60,13 @@ page text       pypdfium2
                     ↓
     DocumentStructuredExtraction
                     ↓
-           future WorkItem
+                WorkItem
+                    ↓
+        deterministic state engine
+                    ↓
+       immutable transition history
+                    ↓
+       future human review queue
 ```
 
 ### Backend
@@ -189,6 +195,18 @@ Implemented API operations include create, list-by-extraction, and get-by-ID.
 
 Represents one immutable, deterministically validated structured result derived from readable document text. It stores required `DocumentExtraction` lineage, optional same-extraction `DocumentClassification` lineage, JSONB field-schema and data snapshots, provider/model/prompt metadata, and a timestamp. Implemented API operations include create, list-by-extraction, and get-by-ID.
 
+#### WorkflowDefinition
+
+Represents an immutable, application-defined state graph. Definitions store exact JSONB state and transition snapshots and are validated for unique identifiers and edges, reachability, terminal-state behavior, and paths to completion. Cycles are allowed when a terminal path remains available.
+
+#### WorkItem
+
+Represents current deterministic workflow state with required IntakeEvent lineage and optional validated DocumentStructuredExtraction lineage. WorkItems begin in the definition initial state at version 1. Structured source data is copied exactly; callers cannot override it.
+
+#### WorkItemTransition
+
+Represents immutable chronological state history, including the initial creation record. State/version changes and history inserts occur atomically through the deterministic transition engine. Expected state and version values reject stale clients.
+
 ## Infrastructure and development environment
 
 - Docker Compose development environment
@@ -199,7 +217,7 @@ Represents one immutable, deterministically validated structured result derived 
 - PostgreSQL health endpoint
 - GitHub Actions CI
 - pytest test suite
-- Alembic migration chain through `20260814_0007`
+- Alembic migration chain through `20260814_0008`
 
 The local development stack has been run successfully on Ubuntu Linux.
 
@@ -257,6 +275,14 @@ The local development stack has been run successfully on Ubuntu Linux.
    - immutable JSONB results with extraction and optional classification lineage
    - create/list/get API
    - no WorkItem, workflow-state, or action behavior
+
+8. **WorkItem + deterministic workflow engine**
+   - immutable validated WorkflowDefinition graphs
+   - WorkItems with source lineage and current state
+   - deterministic state transitions with optimistic concurrency guards
+   - immutable chronological transition audit history
+   - atomic current-state and history persistence
+   - no AI state decisions, actions, timers, or human-approval behavior
 
 ## Verification and test results
 
@@ -332,29 +358,27 @@ A live external-model classification of the real document has not yet been recor
 | Selective OCR for scanned PDFs | 8% | Done |
 | AI document classification | 10% | Done |
 | AI structured data extraction | 12% | Done |
-| WorkItem + deterministic workflow engine | 15% | **Next** |
-| Human review / approval queue | 12% | Not started |
+| WorkItem + deterministic workflow engine | 15% | Done |
+| Human review / approval queue | 12% | **Next** |
 | Basic frontend / dashboard | 8% | Not started |
 | First real intake connector | 4% | Not started |
 | Pilot polish / configuration | 3% | Not started |
 
-Current weighted completion: **~58%**.
+Current weighted completion on this feature branch: **~73%**.
 
 ## Not implemented yet
 
 The repository does **not** yet contain:
 
 - document layout/list interpretation
-- WorkItem domain model
-- deterministic workflow/state engine
 - human review/approval queue
 - frontend/dashboard
 - production intake connectors
 - industry-specific workflow packs
 
-## Next feature: WorkItem + deterministic workflow engine
+## Next feature: Human review / approval queue
 
-The next slice should introduce WorkItems and deterministic workflow behavior using existing immutable intake, artifact, extraction, classification, and structured-extraction records as source lineage. No WorkItem or workflow functionality exists yet.
+After this feature is merged, the next slice should build human review and approval behavior on the deterministic WorkItem foundation. No human-review or approval-queue functionality exists yet.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 

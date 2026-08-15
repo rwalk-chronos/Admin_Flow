@@ -2,7 +2,7 @@
 
 AdminFlow is a local-first administrative workflow engine. It is designed to turn incoming unstructured information into structured, reviewable work items while keeping workflow state and business rules deterministic.
 
-> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral intake/artifact foundations, native PDF extraction, selective OCR, AI document classification, and AI structured data extraction. It is not a production-ready AdminFlow application and does not yet contain workflow behavior.
+> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral intake/artifact foundations, document reading, AI interpretation helpers, and a deterministic WorkItem workflow foundation. It is not a production-ready AdminFlow application and does not yet contain actions, timers, permissions, or human-review behavior.
 
 ## Architecture
 
@@ -258,3 +258,27 @@ curl -X POST \
 ```
 
 The immutable `DocumentStructuredExtraction` stores source lineage, the exact requested field-definition snapshot, validated extracted data, and provider/model/prompt metadata. Application code validates the exact field set, required/null behavior, scalar types, real ISO calendar dates, and string-array elements after every provider response. Structured extraction does not create WorkItems, transition workflow state, or trigger actions.
+
+## WorkItems and deterministic workflows
+
+A `WorkflowDefinition` is an immutable, application-defined graph of states and allowed transitions. Definitions are validated before persistence: state identifiers are constrained, terminal and reachability rules are checked, and cycles are accepted only when every nonterminal state still has a path to a terminal state.
+
+A `WorkItem` holds current mutable workflow state and always retains required `IntakeEvent` lineage. It may also reference a `DocumentStructuredExtraction`; when it does, the application verifies the full source lineage and copies the structured result exactly into the WorkItem data snapshot. The source extraction remains immutable.
+
+Every WorkItem begins at its workflow's `initial_state` with version 1 and an immutable creation transition. Later state changes are available only through the transition endpoint:
+
+```bash
+curl -X POST \
+  http://localhost:8000/work-items/WORK_ITEM_ID/transitions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "expected_state": "ready",
+    "expected_version": 2,
+    "to_state": "in_progress",
+    "reason": "Work has started"
+  }'
+```
+
+The deterministic transition engine verifies the exact allowed edge and uses `expected_state` plus `expected_version` to reject stale clients. WorkItem state/version and immutable transition history are committed atomically. Transition history is returned chronologically by version.
+
+Workflow state names are application-defined and domain-neutral; generic examples include `new`, `ready`, `in_progress`, `waiting`, `completed`, and `cancelled`. AI never chooses or changes workflow state. This foundation does not yet implement actions, timers, permissions, authentication, or human approval behavior.

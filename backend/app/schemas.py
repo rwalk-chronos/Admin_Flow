@@ -163,3 +163,100 @@ class DocumentStructuredExtractionResponse(BaseModel):
     model_name: str
     prompt_version: str
     created_at: datetime
+
+STATE_IDENTIFIER_PATTERN = r"^[a-z][a-z0-9_-]{0,63}$"
+
+
+class WorkflowStateDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    description: str | None = Field(default=None, max_length=500)
+    terminal: bool = False
+
+
+class WorkflowTransitionDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    from_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    to_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+
+
+class WorkflowDefinitionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+    version: int = Field(ge=1)
+    description: str | None = Field(default=None, max_length=1000)
+    states: list[WorkflowStateDefinition] = Field(min_length=1, max_length=50)
+    initial_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    transitions: list[WorkflowTransitionDefinition] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def definition_is_valid(self) -> "WorkflowDefinitionCreate":
+        from app.workflow_engine import validate_workflow_graph
+        if not self.name.strip():
+            raise ValueError("workflow name must not be blank")
+        validate_workflow_graph(self.states, self.initial_state, self.transitions)
+        return self
+
+
+class WorkflowDefinitionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    name: str
+    version: int
+    description: str | None
+    states: list[WorkflowStateDefinition]
+    initial_state: str
+    transitions: list[WorkflowTransitionDefinition]
+    created_at: datetime
+
+
+class WorkItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    workflow_definition_id: uuid.UUID
+    intake_event_id: uuid.UUID
+    document_structured_extraction_id: uuid.UUID | None = None
+    work_type: str = Field(min_length=1, max_length=100)
+    title: str = Field(min_length=1, max_length=500)
+    data: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def source_data_is_unambiguous(self) -> "WorkItemCreate":
+        if not self.work_type.strip() or not self.title.strip():
+            raise ValueError("work_type and title must not be blank")
+        if self.document_structured_extraction_id is not None and self.data is not None:
+            raise ValueError("data cannot override a document structured extraction")
+        return self
+
+
+class WorkItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    workflow_definition_id: uuid.UUID
+    intake_event_id: uuid.UUID
+    document_structured_extraction_id: uuid.UUID | None
+    work_type: str
+    title: str
+    data: dict[str, Any]
+    current_state: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkItemTransitionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    expected_version: int = Field(ge=1)
+    to_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class WorkItemTransitionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    work_item_id: uuid.UUID
+    version: int
+    from_state: str | None
+    to_state: str
+    reason: str | None
+    created_at: datetime
