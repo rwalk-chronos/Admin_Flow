@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="AdminFlow local administrative workflow dashboard">
+  <title>AdminFlow</title>
+  <link rel="stylesheet" href="/app/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#dashboard" aria-label="AdminFlow dashboard">
+        <span class="brand-mark" aria-hidden="true">AF</span>
+        <span>AdminFlow</span>
+      </a>
+      <span class="system-status"><span class="status-dot" aria-hidden="true"></span>Local System</span>
+    </header>
+    <nav class="sidebar" aria-label="Primary navigation">
+      <a href="#dashboard" data-nav="dashboard">Dashboard</a>
+      <a href="#reviews" data-nav="reviews">Review Queue <span id="nav-review-count" class="nav-count" aria-label="pending reviews"></span></a>
+      <a href="#work-items" data-nav="work-items">Work Items</a>
+      <a href="#intake" data-nav="intake">Intake</a>
+    </nav>
+    <main id="main-content" class="content" tabindex="-1">
+      <div class="loading-state" role="status">Loading AdminFlow…</div>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/app/app.js" defer></script>
+</body>
+</html>

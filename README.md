@@ -2,7 +2,7 @@
 
 AdminFlow is a local-first administrative workflow engine. It is designed to turn incoming unstructured information into structured, reviewable work items while keeping workflow state and business rules deterministic.
 
-> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral intake/artifact foundations, document reading, AI interpretation helpers, and a deterministic WorkItem workflow foundation. It is not a production-ready AdminFlow application and does not yet contain actions, timers, permissions, or human-review behavior.
+> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral document processing, a deterministic WorkItem workflow, human review, and a basic local dashboard. It is not a production-ready AdminFlow application and does not yet contain actions, timers, permissions, authentication, or production connectors.
 
 ## Architecture
 
@@ -50,6 +50,8 @@ Run the API from `backend/`:
 ```bash
 uvicorn app.main:app --reload
 ```
+
+Open `http://localhost:8000/app/` to use the local dashboard. Visiting the API root at `http://localhost:8000/` redirects there.
 
 ## Docker Compose
 
@@ -281,7 +283,7 @@ curl -X POST \
 
 The deterministic transition engine verifies the exact allowed edge and uses `expected_state` plus `expected_version` to reject stale clients. WorkItem state/version and immutable transition history are committed atomically. Transition history is returned chronologically by version.
 
-Workflow state names are application-defined and domain-neutral; generic examples include `new`, `ready`, `in_progress`, `waiting`, `completed`, and `cancelled`. AI never chooses or changes workflow state. This foundation does not yet implement actions, timers, permissions, authentication, or human approval behavior.
+Workflow state names are application-defined and domain-neutral; generic examples include `new`, `ready`, `in_progress`, `waiting`, `completed`, and `cancelled`. AI never chooses or changes workflow state. This foundation does not yet implement actions, timers, permissions, or authentication.
 
 ## Human review queue
 
@@ -311,4 +313,20 @@ curl -X POST \
 
 Approval may include corrected `reviewed_data`. For WorkItems backed by a `DocumentStructuredExtraction`, corrections are deterministically validated against its exact persisted field schema; the immutable source extraction is never changed. Rejection never changes WorkItem data. Review resolution locks the WorkItem, uses the existing deterministic transition engine, and atomically persists the decision, WorkItem state/version, and immutable transition history.
 
-The reviewer value is an application-supplied audit identifier in this V1 foundation. Authentication, RBAC, notifications, timers, actions, and a human-review frontend are not implemented. AI never approves, rejects, or changes workflow state.
+The reviewer value is an application-supplied audit identifier in this V1 foundation. Authentication, RBAC, notifications, timers, and actions are not implemented. AI never approves, rejects, or changes workflow state.
+
+## Local dashboard
+
+The basic office dashboard is served by FastAPI at `http://localhost:8000/app/`. It uses static HTML, local CSS, and vanilla JavaScript with no Node build, CDN, external font, analytics, telemetry, or internet dependency.
+
+The dashboard provides:
+
+- an overview of pending reviews, open and terminal WorkItems, and recent intake
+- an oldest-first human review queue with approved and rejected history filters
+- split-screen source-document preview and schema-aware review editing
+- read-only WorkItem state, lineage, transition, and review history
+- recent IntakeEvents and immutable artifact viewing
+
+Approval and rejection use the existing deterministic review endpoint. The browser supplies the expected WorkItem state/version but never selects the target state. PDF files are fetched from local artifact storage as browser blobs and are not placed in URLs or browser storage. Only the reviewer convenience value is retained in local browser storage.
+
+There is no authentication yet, and the reviewer field is only an application-supplied audit identifier. There is also no upload interface in this slice; intake records and artifacts must already exist through the API. The next proof-of-concept slice will add a simple local/manual intake experience.

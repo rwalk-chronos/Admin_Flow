@@ -1,0 +1,56 @@
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+
+def test_root_redirects_to_dashboard() -> None:
+    with TestClient(app, follow_redirects=False) as client:
+        response = client.get("/")
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/app/"
+
+
+def test_dashboard_and_local_assets_are_served() -> None:
+    with TestClient(app) as client:
+        page = client.get("/app/")
+        script = client.get("/app/app.js")
+        stylesheet = client.get("/app/styles.css")
+
+    assert page.status_code == 200
+    assert "AdminFlow" in page.text
+    assert script.status_code == 200
+    assert script.headers["content-type"].startswith("text/javascript")
+    assert stylesheet.status_code == 200
+    assert stylesheet.headers["content-type"].startswith("text/css")
+
+
+def test_dashboard_mount_preserves_health_docs_and_api_routes() -> None:
+    with TestClient(app) as client:
+        health = client.get("/health")
+        docs = client.get("/docs")
+        openapi = client.get("/openapi.json")
+
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+    assert docs.status_code == 200
+    assert openapi.status_code == 200
+    assert "/work-items" in openapi.json()["paths"]
+    assert "/intake-events" in openapi.json()["paths"]
+
+
+def test_frontend_has_no_external_or_unsafe_rendering_dependencies() -> None:
+    static_directory = Path(__file__).parents[1] / "app" / "static"
+    sources = "\n".join(
+        path.read_text(encoding="utf-8") for path in static_directory.iterdir()
+    )
+
+    assert "http://" not in sources
+    assert "https://" not in sources
+    assert ".innerHTML" not in sources
+    assert "console." not in sources
+    assert "localStorage" not in (static_directory / "index.html").read_text()
+    assert "localStorage" not in (static_directory / "styles.css").read_text()
+    assert sources.count("localStorage") == 2

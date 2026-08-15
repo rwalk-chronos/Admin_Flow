@@ -4,7 +4,7 @@ Status captured: 2026-08-15
 
 ## Current state
 
-AdminFlow is at a clean feature boundary with the human review / approval queue merged to `main` on top of the deterministic WorkItem workflow engine.
+AdminFlow has a validated basic local dashboard on the `feature/basic-dashboard` branch, exposing the existing deterministic intake, document, WorkItem, and human-review APIs without adding another workflow path.
 
 Last feature merge:
 
@@ -15,9 +15,9 @@ Last feature merge:
 - all four existing PostgreSQL workflow integration tests also ran and passed
 - Alembic upgraded successfully through `20260815_0009`
 
-Estimated V1 completion: **~85%**.
+Estimated V1 completion on this validated feature branch: **~93%**.
 
-**Next: Basic frontend / dashboard.**
+**Next: Simple local/manual intake for the proof-of-concept.**
 
 ## Product architecture
 
@@ -69,7 +69,9 @@ page text       pypdfium2
                     ↓
          human review queue
                     ↓
-         future frontend dashboard
+        local office dashboard
+                    ↓
+       future manual intake UI
 ```
 
 ### Backend
@@ -300,6 +302,14 @@ The local development stack has been run successfully on Ubuntu Linux.
    - row locking and stale-client guards during resolution
    - no AI review decisions, authentication, notifications, or frontend
 
+10. **Basic frontend / dashboard**
+   - FastAPI-served static HTML, CSS, and vanilla JavaScript
+   - dashboard summaries derived from existing APIs
+   - oldest-first review queue and schema-aware human review form
+   - local PDF Blob preview with object-URL cleanup
+   - read-only WorkItem lineage/history and IntakeEvent artifact views
+   - no external frontend dependencies, upload UI, authentication, or AI calls
+
 ## Verification and test results
 
 ### Selective OCR baseline
@@ -347,6 +357,10 @@ PR #8 was merged to `main` as `8c99a49549f58ae65fb0bc389aed746f39c6bb8f` after f
 
 PR #9 was merged to `main` as `31da87be5f36506ca321b7c0c574fbcf1e6147ab`. GitHub Actions tested the PR merge candidate against fresh PostgreSQL 16, ran Alembic from baseline through `20260815_0009`, and passed 139 tests with 0 skipped and 0 failed. All three new WorkItemReview PostgreSQL integration tests and all four existing workflow PostgreSQL integration tests passed. Deterministic approve/reject routing remained application-controlled; no AI review or workflow-state decisions were introduced.
 
+### Basic frontend / dashboard
+
+The feature branch adds a same-origin local office interface at `/app/`. Focused route/static tests passed 3 tests with 0 failures. The complete local suite passed 123 tests with 20 environment-dependent PostgreSQL/Tesseract tests skipped and 0 failures when external AI configuration was explicitly disabled. JavaScript syntax validation passed. GitHub Actions remains the PostgreSQL validation gate for the feature PR.
+
 ### Prior real-document OCR validation
 
 A real `Condenser Pump Down` PDF was previously used to compare native extraction with an image-only OCR path. The original native-text PDF produced one page, 1,157 characters, `status="extracted"`, and `needs_ocr=false`. Tesseract recovered 1,152 characters from the image-only copy with 84.86% whole-string similarity to the native reference. The recovered text was readable and usable; visible header text, list numbering, whitespace, and layout accounted for accepted differences. Layout interpretation remains deferred to a later document-understanding layer.
@@ -381,24 +395,24 @@ The OCR source contained minor recognition noise, but structured extraction corr
 | AI structured data extraction | 12% | Done |
 | WorkItem + deterministic workflow engine | 15% | Done |
 | Human review / approval queue | 12% | Done |
-| Basic frontend / dashboard | 8% | **Next** |
+| Basic frontend / dashboard | 8% | Done |
 | First real intake connector | 4% | Not started |
 | Pilot polish / configuration | 3% | Not started |
 
-Current weighted completion: **~85%**.
+Current weighted completion on this feature branch: **~93%**.
 
 ## Not implemented yet
 
 The repository does **not** yet contain:
 
 - document layout/list interpretation
-- frontend/dashboard
+- local/manual intake user experience
 - production intake connectors
 - industry-specific workflow packs
 
-## Next feature: Basic frontend / dashboard
+## Next feature: Simple local/manual intake for the proof-of-concept
 
-The next slice should expose the existing deterministic intake, document, WorkItem, and human-review APIs through a basic local dashboard. No frontend functionality exists yet.
+The next slice should add a simple local/manual intake user experience that feeds the existing universal `IntakeEvent` and `IntakeArtifact` engine. The dashboard does not mean a production intake connector exists, and no connector is marked complete.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 

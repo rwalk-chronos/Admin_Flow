@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Response, status
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db import database_is_ready
@@ -23,6 +27,14 @@ app.include_router(intake_artifacts_router)
 app.include_router(intake_events_router)
 app.include_router(work_items_router)
 app.include_router(work_item_reviews_router)
+
+static_directory = Path(__file__).parent / "static"
+app.mount("/app", StaticFiles(directory=static_directory, html=True), name="dashboard")
+
+
+@app.get("/", include_in_schema=False)
+def dashboard_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/app/")
 
 
 @app.get("/health")
