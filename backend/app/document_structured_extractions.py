@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.document_structured_extractor import (
     DocumentStructuredExtractor,
+    LocalStubDocumentStructuredExtractor,
     OpenAIDocumentStructuredExtractor,
     StructuredExtractionProviderError,
     validate_extracted_data,
@@ -31,6 +32,8 @@ SessionDependency = Annotated[Session, Depends(get_session)]
 @lru_cache
 def get_document_structured_extractor() -> DocumentStructuredExtractor:
     settings = get_settings()
+    if settings.ai_provider == "stub":
+        return LocalStubDocumentStructuredExtractor()
     api_key = (
         settings.openai_api_key.get_secret_value().strip()
         if settings.openai_api_key is not None

@@ -12,6 +12,7 @@ from app.document_structured_extractions import (
     router as document_structured_extractions_router,
 )
 from app.document_ocr_api import router as document_ocr_router
+from app.document_processing import router as document_processing_router
 from app.intake_artifacts import router as intake_artifacts_router
 from app.intake_events import router as intake_events_router
 from app.work_items import router as work_items_router
@@ -23,6 +24,7 @@ app.include_router(document_classifications_router)
 app.include_router(document_extractions_router)
 app.include_router(document_structured_extractions_router)
 app.include_router(document_ocr_router)
+app.include_router(document_processing_router)
 app.include_router(intake_artifacts_router)
 app.include_router(intake_events_router)
 app.include_router(work_items_router)

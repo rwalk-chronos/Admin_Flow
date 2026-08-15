@@ -11,6 +11,7 @@ from app.db import get_session
 from app.document_classifier import (
     ClassificationProviderError,
     DocumentClassifier,
+    LocalStubDocumentClassifier,
     OpenAIDocumentClassifier,
 )
 from app.models import DocumentClassification, DocumentExtraction
@@ -27,6 +28,8 @@ SessionDependency = Annotated[Session, Depends(get_session)]
 @lru_cache
 def get_document_classifier() -> DocumentClassifier:
     settings = get_settings()
+    if settings.ai_provider == "stub":
+        return LocalStubDocumentClassifier()
     api_key = (
         settings.openai_api_key.get_secret_value().strip()
         if settings.openai_api_key is not None

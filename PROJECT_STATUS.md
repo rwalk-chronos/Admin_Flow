@@ -4,19 +4,19 @@ Status captured: 2026-08-15
 
 ## Current state
 
-AdminFlow has the basic dashboard merged to `main` and a validated local manual-intake experience on the `feature/manual-intake` branch. Manual intake orchestrates the existing IntakeEvent, IntakeArtifact, native extraction, and selective OCR APIs without adding another intake engine.
+AdminFlow has local manual intake merged to `main` and a validated dual-mode document processing pipeline on the `feature/dual-mode-processing` branch. The same application-owned pipeline uses either a zero-network deterministic local stub or the existing OpenAI adapters.
 
 Last feature merge:
 
-- PR #10 — `Add basic AdminFlow dashboard` — merged to `main`
-- merge commit `aa4656ccd9818e633b635cb1fb7fe53dfba0b325`
-- final GitHub Actions validation: 143 passed, 0 skipped, and 0 failed
-- PostgreSQL integration tests ran and passed
+- PR #11 — `Add local manual intake experience` — merged to `main`
+- merge commit `a2f7ba570c8fac8dbe7ef5ed033d10d4b93447c3`
+- final GitHub Actions validation: 145 passed, 0 skipped, and 0 failed
+- PostgreSQL integration tests and real Tesseract OCR tests ran and passed
 - Alembic upgraded successfully through `20260815_0009`
 
 Estimated V1 completion on this validated feature branch: **~93%**.
 
-**Next: Local stub demo processing pipeline.**
+**Next: Pilot polish / demo configuration package.**
 
 ## Product architecture
 
@@ -72,7 +72,7 @@ page text       pypdfium2
                     ↓
        local manual intake UI
                     ↓
-     future local stub demo pipeline
+     dual-mode processing pipeline
 ```
 
 ### Backend
@@ -320,6 +320,13 @@ The local development stack has been run successfully on Ubuntu Linux.
    - Intake detail extraction summaries and existing artifact preview
    - no AI calls, new domain model, migration, or production connector
 
+12. **Dual-mode document processing pipeline**
+   - explicit local stub or OpenAI provider selection
+   - application-owned generic office taxonomy, field schemas, title rules, and workflow
+   - atomic classification, structured extraction, WorkItem, transition, and review persistence
+   - idempotent processing reuse through existing lineage
+   - no provider-controlled workflow decisions and no new migration
+
 ## Verification and test results
 
 ### Selective OCR baseline
@@ -373,7 +380,11 @@ PR #10 was merged to `main` as `aa4656ccd9818e633b635cb1fb7fe53dfba0b325` after 
 
 ### Simple local/manual intake
 
-The feature branch adds browser-orchestrated manual intake through existing APIs. Focused dashboard tests passed 6 tests. The complete local suite passed 125 tests with 20 environment-gated skips and 0 failures with external AI configuration disabled. Synthetic native-PDF upload and extraction, image-only PDF OCR eligibility, non-PDF preservation, Intake detail status rendering, PDF Blob preview, docs, and health were validated. The host lacked Tesseract, so the local OCR attempt produced the expected controlled failed extraction; GitHub Actions remains the real-Tesseract and PostgreSQL validation gate.
+PR #11 was merged to `main` as `a2f7ba570c8fac8dbe7ef5ed033d10d4b93447c3` after GitHub Actions passed 145 tests with 0 skipped and 0 failed. PostgreSQL integration and real Tesseract tests ran and passed; Alembic remained at `20260815_0009`.
+
+### Dual-mode document processing
+
+The feature branch validates deterministic local stub providers, explicit OpenAI-mode selection without live calls, application-owned profiles, atomic pipeline persistence, idempotent reuse, WorkItem/review creation, source immutability, and frontend review routing. Local validation passed 132 tests with 21 environment-gated skips and 0 failures. GitHub Actions is the PostgreSQL and real-OCR validation gate.
 
 ### Prior real-document OCR validation
 
@@ -420,13 +431,13 @@ Current weighted completion on this feature branch: **~93%**.
 The repository does **not** yet contain:
 
 - document layout/list interpretation
-- local stub demo processing pipeline
+- pilot polish / demo configuration package
 - production intake connectors
 - industry-specific workflow packs
 
-## Next feature: Local stub demo processing pipeline
+## Next feature: Pilot polish / demo configuration package
 
-The next proof-of-concept slice should take locally received and extracted documents and use deterministic local stub classification and structured-extraction configuration to create demo WorkItems and human-review tasks without an external AI service. The stub is not implemented in this feature.
+The next slice should provide a synthetic demo document package, polished provider and configuration UX, startup/readiness checks, demo reset/seed capability where appropriate, and small-office presentation polish. Production connectors remain out of scope.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 

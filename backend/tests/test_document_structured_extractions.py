@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app.config import get_settings
 from app.db import get_session
 from app.document_structured_extractions import get_document_structured_extractor
 from app.document_structured_extractor import (
@@ -89,6 +90,8 @@ def client(engine, extractor) -> Generator[TestClient, None, None]:
             yield test_client
     finally:
         app.dependency_overrides.clear()
+        get_document_structured_extractor.cache_clear()
+        get_settings.cache_clear()
 
 
 def create_extraction(engine, text="Readable source document") -> str:
@@ -503,7 +506,11 @@ def test_list_newest_first_and_get(client, engine, extractor):
     assert retrieved.json()["id"] == first["id"]
 
 
-def test_missing_configuration_affects_only_structured_extraction(engine):
+def test_missing_configuration_affects_only_structured_extraction(engine, monkeypatch):
+    monkeypatch.setenv("AI_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+    get_document_structured_extractor.cache_clear()
     def override_session():
         with Session(engine) as session:
             yield session
@@ -519,6 +526,8 @@ def test_missing_configuration_affects_only_structured_extraction(engine):
             health = test_client.get("/health")
     finally:
         app.dependency_overrides.clear()
+        get_document_structured_extractor.cache_clear()
+        get_settings.cache_clear()
     assert response.status_code == 503
     assert health.status_code == 200
 

@@ -174,3 +174,61 @@ def _value_matches_type(field_type: str, value: Any) -> bool:
     if field_type == "array_string":
         return type(value) is list and all(type(item) is str for item in value)
     return False
+
+class LocalStubDocumentStructuredExtractor:
+    provider_name = "local_stub"
+    model_name = "deterministic-stub-v1"
+    prompt_version = "document-structured-extraction-stub-v1"
+
+    def extract(self, *, text: str, fields: list[StructuredFieldDefinition], classification_context: dict[str, str] | None) -> StructuredExtractionResult:
+        lines = text.splitlines()
+        data: dict[str, Any] = {}
+        for field in fields:
+            labels = {field.name.casefold().replace("_", " ").replace("-", " ")}
+            values = []
+            for line in lines:
+                for separator in (":", " - "):
+                    if separator in line:
+                        label, value = line.split(separator, 1)
+                        normalized = " ".join(label.casefold().replace("_", " ").replace("-", " ").split())
+                        if normalized in labels:
+                            values.append(value.strip())
+                            break
+            if not values:
+                if field.required:
+                    raise StructuredExtractionProviderError(f"Required field '{field.name}' was not found")
+                data[field.name] = None
+                continue
+            try:
+                data[field.name] = self._convert(field.type, values)
+            except ValueError as exc:
+                raise StructuredExtractionProviderError(f"Field '{field.name}' has an invalid {field.type} value") from exc
+        return StructuredExtractionResult(data=data)
+
+    @staticmethod
+    def _convert(field_type: str, values: list[str]) -> Any:
+        value = values[0]
+        if field_type == "string":
+            return value
+        if field_type == "integer":
+            if not value.lstrip("+-").isdigit(): raise ValueError
+            return int(value)
+        if field_type == "number":
+            result = float(value)
+            if not math.isfinite(result): raise ValueError
+            return result
+        if field_type == "boolean":
+            normalized = value.casefold()
+            if normalized in {"true", "yes"}: return True
+            if normalized in {"false", "no"}: return False
+            raise ValueError
+        if field_type == "date":
+            try:
+                return date.fromisoformat(value).isoformat()
+            except ValueError:
+                from datetime import datetime
+                return datetime.strptime(value, "%m/%d/%Y").date().isoformat()
+        if field_type == "array_string":
+            import re
+            return [item.strip() for entry in values for item in re.split(r"[,;]", entry) if item.strip()]
+        raise ValueError
