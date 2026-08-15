@@ -4,20 +4,19 @@ Status captured: 2026-08-15
 
 ## Current state
 
-AdminFlow has a validated basic local dashboard on the `feature/basic-dashboard` branch, exposing the existing deterministic intake, document, WorkItem, and human-review APIs without adding another workflow path.
+AdminFlow has the basic dashboard merged to `main` and a validated local manual-intake experience on the `feature/manual-intake` branch. Manual intake orchestrates the existing IntakeEvent, IntakeArtifact, native extraction, and selective OCR APIs without adding another intake engine.
 
 Last feature merge:
 
-- PR #9 — `Add human review queue` — merged to `main`
-- merge commit `31da87be5f36506ca321b7c0c574fbcf1e6147ab`
-- final GitHub Actions validation: 139 passed, 0 skipped, and 0 failed
-- all three new PostgreSQL human-review integration tests ran and passed
-- all four existing PostgreSQL workflow integration tests also ran and passed
+- PR #10 — `Add basic AdminFlow dashboard` — merged to `main`
+- merge commit `aa4656ccd9818e633b635cb1fb7fe53dfba0b325`
+- final GitHub Actions validation: 143 passed, 0 skipped, and 0 failed
+- PostgreSQL integration tests ran and passed
 - Alembic upgraded successfully through `20260815_0009`
 
 Estimated V1 completion on this validated feature branch: **~93%**.
 
-**Next: Simple local/manual intake for the proof-of-concept.**
+**Next: Local stub demo processing pipeline.**
 
 ## Product architecture
 
@@ -71,7 +70,9 @@ page text       pypdfium2
                     ↓
         local office dashboard
                     ↓
-       future manual intake UI
+       local manual intake UI
+                    ↓
+     future local stub demo pipeline
 ```
 
 ### Backend
@@ -308,7 +309,16 @@ The local development stack has been run successfully on Ubuntu Linux.
    - oldest-first review queue and schema-aware human review form
    - local PDF Blob preview with object-URL cleanup
    - read-only WorkItem lineage/history and IntakeEvent artifact views
-   - no external frontend dependencies, upload UI, authentication, or AI calls
+   - no external frontend dependencies, authentication, or AI calls
+
+11. **Simple local/manual intake for the proof-of-concept**
+   - multi-file picker and keyboard-accessible drag-and-drop form
+   - sequential orchestration of existing IntakeEvent and IntakeArtifact APIs
+   - automatic native PDF extraction and selective local OCR
+   - non-PDF preservation without inappropriate PDF processing
+   - per-file progress and honest partial-failure reporting
+   - Intake detail extraction summaries and existing artifact preview
+   - no AI calls, new domain model, migration, or production connector
 
 ## Verification and test results
 
@@ -359,7 +369,11 @@ PR #9 was merged to `main` as `31da87be5f36506ca321b7c0c574fbcf1e6147ab`. GitHub
 
 ### Basic frontend / dashboard
 
-The feature branch adds a same-origin local office interface at `/app/`. Focused route/static tests passed 3 tests with 0 failures. The complete local suite passed 123 tests with 20 environment-dependent PostgreSQL/Tesseract tests skipped and 0 failures when external AI configuration was explicitly disabled. JavaScript syntax validation passed. GitHub Actions remains the PostgreSQL validation gate for the feature PR.
+PR #10 was merged to `main` as `aa4656ccd9818e633b635cb1fb7fe53dfba0b325` after GitHub Actions passed 143 tests with 0 skipped and 0 failed. PostgreSQL integration tests ran and passed, and Alembic upgraded through `20260815_0009`.
+
+### Simple local/manual intake
+
+The feature branch adds browser-orchestrated manual intake through existing APIs. Focused dashboard tests passed 6 tests. The complete local suite passed 125 tests with 20 environment-gated skips and 0 failures with external AI configuration disabled. Synthetic native-PDF upload and extraction, image-only PDF OCR eligibility, non-PDF preservation, Intake detail status rendering, PDF Blob preview, docs, and health were validated. The host lacked Tesseract, so the local OCR attempt produced the expected controlled failed extraction; GitHub Actions remains the real-Tesseract and PostgreSQL validation gate.
 
 ### Prior real-document OCR validation
 
@@ -406,13 +420,13 @@ Current weighted completion on this feature branch: **~93%**.
 The repository does **not** yet contain:
 
 - document layout/list interpretation
-- local/manual intake user experience
+- local stub demo processing pipeline
 - production intake connectors
 - industry-specific workflow packs
 
-## Next feature: Simple local/manual intake for the proof-of-concept
+## Next feature: Local stub demo processing pipeline
 
-The next slice should add a simple local/manual intake user experience that feeds the existing universal `IntakeEvent` and `IntakeArtifact` engine. The dashboard does not mean a production intake connector exists, and no connector is marked complete.
+The next proof-of-concept slice should take locally received and extracted documents and use deterministic local stub classification and structured-extraction configuration to create demo WorkItems and human-review tasks without an external AI service. The stub is not implemented in this feature.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 
