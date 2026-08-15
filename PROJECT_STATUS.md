@@ -4,17 +4,18 @@ Status captured: 2026-08-15
 
 ## Current state
 
-AdminFlow is implementing the human review and approval queue on feature branch `feature/human-review-queue`, based on the deterministic WorkItem engine in `main`.
+AdminFlow is at a clean feature boundary with the human review / approval queue merged to `main` on top of the deterministic WorkItem workflow engine.
 
 Last feature merge:
 
-- PR #8 — `Add deterministic WorkItem workflow engine` — merged to `main`
-- merge commit `8c99a49549f58ae65fb0bc389aed746f39c6bb8f`
-- final GitHub Actions validation: 113 passed, 0 skipped, and 0 failed
-- all four PostgreSQL workflow integration tests ran and passed
-- Alembic upgraded through `20260814_0008`
+- PR #9 — `Add human review queue` — merged to `main`
+- merge commit `31da87be5f36506ca321b7c0c574fbcf1e6147ab`
+- final GitHub Actions validation: 139 passed, 0 skipped, and 0 failed
+- all three new PostgreSQL human-review integration tests ran and passed
+- all four existing PostgreSQL workflow integration tests also ran and passed
+- Alembic upgraded successfully through `20260815_0009`
 
-Estimated V1 completion on this validated feature branch: **~85%**.
+Estimated V1 completion: **~85%**.
 
 **Next: Basic frontend / dashboard.**
 
@@ -342,6 +343,10 @@ PR #7 was merged to `main` as `3f5ab13372fa8942c0460f2c9bc2b99bb7ad7b26` after f
 
 PR #8 was merged to `main` as `8c99a49549f58ae65fb0bc389aed746f39c6bb8f` after final GitHub Actions validation passed with 113 tests, 0 skipped, and 0 failed. All four PostgreSQL workflow integration tests executed and passed, and Alembic upgraded through `20260814_0008`. Workflow-state decisions remain deterministic and no human-review functionality was added.
 
+### Human review / approval queue
+
+PR #9 was merged to `main` as `31da87be5f36506ca321b7c0c574fbcf1e6147ab`. GitHub Actions tested the PR merge candidate against fresh PostgreSQL 16, ran Alembic from baseline through `20260815_0009`, and passed 139 tests with 0 skipped and 0 failed. All three new WorkItemReview PostgreSQL integration tests and all four existing workflow PostgreSQL integration tests passed. Deterministic approve/reject routing remained application-controlled; no AI review or workflow-state decisions were introduced.
+
 ### Prior real-document OCR validation
 
 A real `Condenser Pump Down` PDF was previously used to compare native extraction with an image-only OCR path. The original native-text PDF produced one page, 1,157 characters, `status="extracted"`, and `needs_ocr=false`. Tesseract recovered 1,152 characters from the image-only copy with 84.86% whole-string similarity to the native reference. The recovered text was readable and usable; visible header text, list numbering, whitespace, and layout accounted for accepted differences. Layout interpretation remains deferred to a later document-understanding layer.
@@ -380,7 +385,7 @@ The OCR source contained minor recognition noise, but structured extraction corr
 | First real intake connector | 4% | Not started |
 | Pilot polish / configuration | 3% | Not started |
 
-Current weighted completion on this feature branch: **~85%**.
+Current weighted completion: **~85%**.
 
 ## Not implemented yet
 
@@ -393,7 +398,7 @@ The repository does **not** yet contain:
 
 ## Next feature: Basic frontend / dashboard
 
-After this feature is merged, the next slice should expose the existing deterministic intake, document, WorkItem, and human-review APIs through a basic local dashboard. No frontend functionality exists yet.
+The next slice should expose the existing deterministic intake, document, WorkItem, and human-review APIs through a basic local dashboard. No frontend functionality exists yet.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 
