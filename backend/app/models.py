@@ -72,6 +72,7 @@ class IntakeEvent(Base):
     artifacts: Mapped[list["IntakeArtifact"]] = relationship(
         back_populates="intake_event"
     )
+    work_items: Mapped[list["WorkItem"]] = relationship(back_populates="intake_event")
 
 
 class IntakeArtifact(Base):
@@ -255,3 +256,62 @@ class DocumentStructuredExtraction(Base):
     document_classification: Mapped[DocumentClassification | None] = relationship(
         back_populates="structured_extractions"
     )
+    work_items: Mapped[list["WorkItem"]] = relationship(
+        back_populates="document_structured_extraction"
+    )
+
+
+class WorkflowDefinition(Base):
+    __tablename__ = "workflow_definitions"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_workflow_definitions_version"),
+        UniqueConstraint("name", "version", name="uq_workflow_definitions_name_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    states: Mapped[list[dict[str, Any]]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    initial_state: Mapped[str] = mapped_column(String(64), nullable=False)
+    transitions: Mapped[list[dict[str, str]]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    work_items: Mapped[list["WorkItem"]] = relationship(back_populates="workflow_definition")
+
+
+class WorkItem(Base):
+    __tablename__ = "work_items"
+    __table_args__ = (CheckConstraint("version >= 1", name="ck_work_items_version"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_definition_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflow_definitions.id"), nullable=False, index=True)
+    intake_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("intake_events.id"), nullable=False, index=True)
+    document_structured_extraction_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("document_structured_extractions.id"), nullable=True, index=True)
+    work_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    data: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False, default=dict)
+    current_state: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    workflow_definition: Mapped[WorkflowDefinition] = relationship(back_populates="work_items")
+    intake_event: Mapped[IntakeEvent] = relationship(back_populates="work_items")
+    document_structured_extraction: Mapped[DocumentStructuredExtraction | None] = relationship(back_populates="work_items")
+    transitions: Mapped[list["WorkItemTransition"]] = relationship(back_populates="work_item", order_by="WorkItemTransition.version")
+
+
+class WorkItemTransition(Base):
+    __tablename__ = "work_item_transitions"
+    __table_args__ = (
+        CheckConstraint("version >= 1", name="ck_work_item_transitions_version"),
+        UniqueConstraint("work_item_id", "version", name="uq_work_item_transitions_item_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("work_items.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(nullable=False)
+    from_state: Mapped[str | None] = mapped_column(String(64))
+    to_state: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    work_item: Mapped[WorkItem] = relationship(back_populates="transitions")
