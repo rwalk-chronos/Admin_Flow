@@ -4,7 +4,7 @@ Status captured: 2026-08-15
 
 ## Current state
 
-AdminFlow is at a clean feature boundary with the WorkItem and deterministic workflow engine merged to `main` on top of the intake and document-processing foundations.
+AdminFlow is implementing the human review and approval queue on feature branch `feature/human-review-queue`, based on the deterministic WorkItem engine in `main`.
 
 Last feature merge:
 
@@ -14,9 +14,9 @@ Last feature merge:
 - all four PostgreSQL workflow integration tests ran and passed
 - Alembic upgraded through `20260814_0008`
 
-Estimated V1 completion: **~73%**.
+Estimated V1 completion on this validated feature branch: **~85%**.
 
-**Next: Human review / approval queue.**
+**Next: Basic frontend / dashboard.**
 
 ## Product architecture
 
@@ -66,7 +66,9 @@ page text       pypdfium2
                     ↓
        immutable transition history
                     ↓
-       future human review queue
+         human review queue
+                    ↓
+         future frontend dashboard
 ```
 
 ### Backend
@@ -207,6 +209,10 @@ Represents current deterministic workflow state with required IntakeEvent lineag
 
 Represents immutable chronological state history, including the initial creation record. State/version changes and history inserts occur atomically through the deterministic transition engine. Expected state and version values reject stale clients.
 
+#### WorkItemReview
+
+Represents the persisted human-review task and audit result for an exact WorkItem state and version. Pending reviews are created atomically when review-required states are entered. Approval or rejection maps to immutable WorkflowDefinition edges and resolves through the existing deterministic transition engine. Human corrections are retained as review snapshots without modifying immutable structured-extraction sources.
+
 ## Infrastructure and development environment
 
 - Docker Compose development environment
@@ -217,7 +223,7 @@ Represents immutable chronological state history, including the initial creation
 - PostgreSQL health endpoint
 - GitHub Actions CI
 - pytest test suite
-- Alembic migration chain through `20260814_0008`
+- Alembic migration chain through `20260815_0009`
 
 The local development stack has been run successfully on Ubuntu Linux.
 
@@ -283,6 +289,15 @@ The local development stack has been run successfully on Ubuntu Linux.
    - immutable chronological transition audit history
    - atomic current-state and history persistence
    - no AI state decisions, actions, timers, or human-approval behavior
+
+9. **Human review / approval queue**
+   - workflow states explicitly declare review requirements
+   - deterministic approve/reject edge mapping
+   - pending review creation within WorkItem transactions
+   - oldest-first review queue and immutable review audit records
+   - strict structured-data correction validation
+   - row locking and stale-client guards during resolution
+   - no AI review decisions, authentication, notifications, or frontend
 
 ## Verification and test results
 
@@ -360,26 +375,25 @@ The OCR source contained minor recognition noise, but structured extraction corr
 | AI document classification | 10% | Done |
 | AI structured data extraction | 12% | Done |
 | WorkItem + deterministic workflow engine | 15% | Done |
-| Human review / approval queue | 12% | **Next** |
-| Basic frontend / dashboard | 8% | Not started |
+| Human review / approval queue | 12% | Done |
+| Basic frontend / dashboard | 8% | **Next** |
 | First real intake connector | 4% | Not started |
 | Pilot polish / configuration | 3% | Not started |
 
-Current weighted completion: **~73%**.
+Current weighted completion on this feature branch: **~85%**.
 
 ## Not implemented yet
 
 The repository does **not** yet contain:
 
 - document layout/list interpretation
-- human review/approval queue
 - frontend/dashboard
 - production intake connectors
 - industry-specific workflow packs
 
-## Next feature: Human review / approval queue
+## Next feature: Basic frontend / dashboard
 
-The next slice should build human review and approval behavior on the deterministic WorkItem foundation. No human-review or approval-queue functionality exists yet.
+After this feature is merged, the next slice should expose the existing deterministic intake, document, WorkItem, and human-review APIs through a basic local dashboard. No frontend functionality exists yet.
 
 ## Handoff instructions for a new ChatGPT / Codex session
 

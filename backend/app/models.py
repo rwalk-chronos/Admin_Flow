@@ -298,6 +298,9 @@ class WorkItem(Base):
     intake_event: Mapped[IntakeEvent] = relationship(back_populates="work_items")
     document_structured_extraction: Mapped[DocumentStructuredExtraction | None] = relationship(back_populates="work_items")
     transitions: Mapped[list["WorkItemTransition"]] = relationship(back_populates="work_item", order_by="WorkItemTransition.version")
+    reviews: Mapped[list["WorkItemReview"]] = relationship(
+        back_populates="work_item", order_by="WorkItemReview.created_at"
+    )
 
 
 class WorkItemTransition(Base):
@@ -315,3 +318,54 @@ class WorkItemTransition(Base):
     reason: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     work_item: Mapped[WorkItem] = relationship(back_populates="transitions")
+
+
+class WorkItemReview(Base):
+    __tablename__ = "work_item_reviews"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected')",
+            name="ck_work_item_reviews_status",
+        ),
+        CheckConstraint(
+            "work_item_version >= 1", name="ck_work_item_reviews_version"
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND reviewer IS NULL AND resolved_at IS NULL "
+            "AND reviewed_data IS NULL) OR "
+            "(status IN ('approved', 'rejected') AND reviewer IS NOT NULL "
+            "AND resolved_at IS NOT NULL)",
+            name="ck_work_item_reviews_resolution",
+        ),
+        CheckConstraint(
+            "status != 'rejected' OR reviewed_data IS NULL",
+            name="ck_work_item_reviews_rejected_data",
+        ),
+        UniqueConstraint(
+            "work_item_id",
+            "work_item_version",
+            name="uq_work_item_reviews_item_version",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    work_item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("work_items.id"), nullable=False, index=True
+    )
+    work_item_version: Mapped[int] = mapped_column(nullable=False)
+    state: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default="pending"
+    )
+    reviewer: Mapped[str | None] = mapped_column(String(255))
+    notes: Mapped[str | None] = mapped_column(Text)
+    reviewed_data: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    work_item: Mapped[WorkItem] = relationship(back_populates="reviews")
