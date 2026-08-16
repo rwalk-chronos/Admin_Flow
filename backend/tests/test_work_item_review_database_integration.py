@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_engine
 from app.main import app
-from app.models import WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
+from app.models import ActionExecution, ActionPlan, InternalTask, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
 
 pytestmark = pytest.mark.integration
 
@@ -24,6 +24,7 @@ def require_integration_database() -> None:
 @pytest.fixture
 def clean_reviews() -> Generator[None, None, None]:
     with Session(get_engine()) as session:
+        session.execute(delete(InternalTask)); session.execute(delete(ActionExecution)); session.execute(delete(ActionPlan))
         session.execute(delete(WorkItemReview))
         session.execute(delete(WorkItemTransition))
         session.execute(delete(WorkItem))
@@ -31,6 +32,7 @@ def clean_reviews() -> Generator[None, None, None]:
         session.commit()
     yield
     with Session(get_engine()) as session:
+        session.execute(delete(InternalTask)); session.execute(delete(ActionExecution)); session.execute(delete(ActionPlan))
         session.execute(delete(WorkItemReview))
         session.execute(delete(WorkItemTransition))
         session.execute(delete(WorkItem))
@@ -69,13 +71,25 @@ def create_item(client, workflow, event):
 def test_migration_0009_schema_constraints_and_indexes() -> None:
     inspector = inspect(get_engine())
     columns = {column["name"]: column for column in inspector.get_columns("work_item_reviews")}
-    assert set(columns) == {"id", "work_item_id", "work_item_version", "state", "status", "reviewer", "notes", "reviewed_data", "created_at", "resolved_at"}
+    assert set(columns) == {"id", "work_item_id", "work_item_version", "state", "status", "reviewer", "notes", "reviewed_data", "authorized_action_plan_id", "created_at", "resolved_at"}
     assert isinstance(columns["reviewed_data"]["type"], JSONB)
     assert any(fk["constrained_columns"] == ["work_item_id"] and fk["referred_table"] == "work_items" for fk in inspector.get_foreign_keys("work_item_reviews"))
     indexes = {tuple(index["column_names"]) for index in inspector.get_indexes("work_item_reviews")}
     assert {("work_item_id",), ("status", "created_at")} <= indexes
     assert {constraint["name"] for constraint in inspector.get_unique_constraints("work_item_reviews")} >= {"uq_work_item_reviews_item_version"}
     assert {constraint["name"] for constraint in inspector.get_check_constraints("work_item_reviews")} >= {"ck_work_item_reviews_status", "ck_work_item_reviews_version", "ck_work_item_reviews_resolution", "ck_work_item_reviews_rejected_data"}
+
+
+def test_migration_0010_action_schema_constraints_and_lineage() -> None:
+    inspector = inspect(get_engine())
+    assert {"action_plans", "action_executions", "internal_tasks"} <= set(inspector.get_table_names())
+    plan_columns = {column["name"] for column in inspector.get_columns("action_plans")}
+    assert {"work_item_id", "workflow_definition_id", "intake_event_id", "facts_snapshot", "payload", "source_artifact_ids", "superseded_at"} <= plan_columns
+    assert {constraint["name"] for constraint in inspector.get_unique_constraints("action_plans")} >= {"uq_action_plans_item_revision"}
+    assert {constraint["name"] for constraint in inspector.get_unique_constraints("action_executions")} >= {"uq_action_executions_plan", "uq_action_executions_idempotency"}
+    assert {constraint["name"] for constraint in inspector.get_unique_constraints("internal_tasks")} >= {"uq_internal_tasks_execution"}
+    review_fks = inspector.get_foreign_keys("work_item_reviews")
+    assert any(fk["constrained_columns"] == ["authorized_action_plan_id"] and fk["referred_table"] == "action_plans" for fk in review_fks)
 
 
 def test_postgresql_initial_review_and_resolution_are_atomic_with_row_lock_path(clean_reviews) -> None:

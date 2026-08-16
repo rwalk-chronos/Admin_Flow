@@ -13,11 +13,17 @@ from app.document_structured_extractions import get_document_structured_extracto
 from app.document_structured_extractor import StructuredExtractionResult
 from app.main import app
 from app.models import (
+    ActionExecution,
+    ActionPlan,
     DocumentClassification,
     DocumentExtraction,
     DocumentStructuredExtraction,
     IntakeArtifact,
     IntakeEvent,
+    InternalTask,
+    WorkItem,
+    WorkItemReview,
+    WorkItemTransition,
 )
 
 pytestmark = pytest.mark.integration
@@ -56,6 +62,8 @@ def clean_structured_extraction_data() -> Generator[None, None, None]:
 
 def _clean_database() -> None:
     with Session(get_engine()) as session:
+        session.execute(delete(InternalTask)); session.execute(delete(ActionExecution)); session.execute(delete(ActionPlan))
+        session.execute(delete(WorkItemReview)); session.execute(delete(WorkItemTransition)); session.execute(delete(WorkItem))
         session.execute(delete(DocumentStructuredExtraction))
         session.execute(delete(DocumentClassification))
         session.execute(delete(DocumentExtraction))

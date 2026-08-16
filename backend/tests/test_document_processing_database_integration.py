@@ -14,7 +14,7 @@ from app.document_classifier import ClassificationResult, LocalStubDocumentClass
 from app.document_structured_extractions import get_document_structured_extractor
 from app.document_structured_extractor import LocalStubDocumentStructuredExtractor
 from app.main import app
-from app.models import DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
+from app.models import ActionExecution, ActionPlan, DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, InternalTask, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
 
 pytestmark = pytest.mark.integration
 
@@ -57,6 +57,11 @@ def test_postgresql_complete_stub_pipeline_atomic_lineage_and_idempotency():
         assert len(list(session.scalars(select(WorkItemTransition).where(WorkItemTransition.work_item_id == item.id)))) == 1
         review = session.scalar(select(WorkItemReview).where(WorkItemReview.work_item_id == item.id))
         assert review.status == "pending" and review.state == "needs_review"
+        plan = session.scalar(select(ActionPlan).where(ActionPlan.work_item_id == item.id))
+        assert plan.action_type == "create_internal_task"
+        session.execute(delete(InternalTask).where(InternalTask.work_item_id == item.id))
+        session.execute(delete(ActionExecution).where(ActionExecution.action_plan_id == plan.id))
+        session.execute(delete(ActionPlan).where(ActionPlan.work_item_id == item.id))
         session.execute(delete(WorkItemReview).where(WorkItemReview.work_item_id == item.id))
         session.execute(delete(WorkItemTransition).where(WorkItemTransition.work_item_id == item.id))
         session.execute(delete(WorkItem).where(WorkItem.id == item.id))
@@ -120,6 +125,10 @@ def test_postgresql_concurrent_processing_is_idempotent():
         assert (source.status, source.text_content, source.character_count) == source_snapshot
         assert (source_artifact.sha256, source_artifact.storage_key, source_artifact.byte_size) == artifact_snapshot
 
+        plan_ids = select(ActionPlan.id).where(ActionPlan.work_item_id == items[0].id)
+        session.execute(delete(InternalTask).where(InternalTask.work_item_id == items[0].id))
+        session.execute(delete(ActionExecution).where(ActionExecution.action_plan_id.in_(plan_ids)))
+        session.execute(delete(ActionPlan).where(ActionPlan.work_item_id == items[0].id))
         session.execute(delete(WorkItemReview).where(WorkItemReview.work_item_id == items[0].id))
         session.execute(delete(WorkItemTransition).where(WorkItemTransition.work_item_id == items[0].id))
         session.execute(delete(WorkItem).where(WorkItem.id == items[0].id))
