@@ -319,6 +319,8 @@ The reviewer value is an application-supplied audit identifier in this V1 founda
 
 The application-owned `generic_office` processing profile creates an immutable, connectorless `create_internal_task` Action Plan alongside its review. The review screen explains exactly what approval will do, discloses that no external message will be sent, keeps the original document visible, and requires authorization of the exact current plan ID and facts snapshot.
 
+`GET /work-item-reviews/{id}/decision-packet` provides the human-facing review projection without adding another persisted record or AI request. It follows immutable classification and extraction lineage server-side and returns a plain-language document type and confidence band, deterministic summary, readable key information, attention items, original artifacts, current Action Plan presentation, and the correction contract. The browser defaults to this read-first Decision Packet; correction inputs appear only after **Correct Information**, and **Review Changes** revises the immutable Action Plan before authorization is offered again.
+
 If reviewed facts change, `POST /work-item-reviews/{id}/action-plan` validates them and creates a new immutable revision; the previous plan is retained as superseded. Approval creates one `ActionExecution` and one `InternalTask` transactionally using the Action Plan as the idempotency identity. Approval, execution success, and workflow transitions remain separate audit facts. **Handle Manually** preserves the source and review context without executing the plan.
 
 Action history is available through the WorkItem detail screen and these APIs:
@@ -329,6 +331,8 @@ GET /action-plans/{id}
 GET /action-plans/{id}/executions
 GET /internal-tasks
 GET /internal-tasks/{id}
+GET /work-item-reviews/{id}/decision-packet
+GET /work-items/{id}/decision-packet
 ```
 
 No email, fax, calendar, EHR, CRM, or other external connector is invoked by this action slice.
@@ -341,7 +345,7 @@ The dashboard provides:
 
 - an overview of pending reviews, open and terminal WorkItems, and recent intake
 - an oldest-first human review queue with approved and rejected history filters
-- split-screen source-document preview and schema-aware review editing
+- split-screen source-document preview and read-first Decision Packet with optional correction mode
 - read-only WorkItem state, lineage, transition, and review history
 - recent IntakeEvents and immutable artifact viewing
 

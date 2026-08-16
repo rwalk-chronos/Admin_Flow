@@ -106,8 +106,37 @@ def test_manual_intake_uses_server_owned_processing_profile_and_review_routing()
 
 def test_review_ui_explains_and_authorizes_exact_action_plan() -> None:
     source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "Summary" in source
+    assert "Key information" in source
+    assert "Needs your attention" in source
     assert "What will happen next" in source
+    assert "Correct Information" in source
     assert "Handle Manually" in source
-    assert "action_plan_id: actionPlan?.id" in source
-    assert "The Action Plan was revised" in source
-    assert "attachmentPane(artifacts)" in source
+    assert "action_plan_id: packet.action_plan?.id" in source
+    assert "View Original Document" in source
+    assert "Review Changes" in source
+    assert "Information updated. Review the revised action before approving." in source
+    assert "Technical details" in source
+
+
+def test_review_defaults_to_decision_packet_not_technical_editor() -> None:
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    read_mode = source[source.index("const drawReadMode"):source.index("const drawCorrectionMode")]
+    correction_mode = source[source.index("const drawCorrectionMode"):source.index("drawReadMode();")]
+    assert "structuredEditor(" not in read_mode
+    assert "genericEditor(" not in read_mode
+    assert "structuredEditor(" in correction_mode
+    assert "work_type" not in read_mode
+    assert "technical.state" not in read_mode
+    assert "definition.type" not in read_mode
+    assert "Set optional value" not in source
+    assert "form_review" not in read_mode
+    assert "needs_review" not in read_mode
+
+
+def test_completed_action_work_item_prioritizes_outcome_over_technical_details() -> None:
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    completed = source[source.index("if (plans.length)"):source.index('content.append(pageHeader("Work item"')]
+    assert completed.index("What happened") < completed.index("Technical details")
+    assert completed.index("Key information") < completed.index("Technical details")
+    assert completed.index("View Original Document") < completed.index("Technical details")

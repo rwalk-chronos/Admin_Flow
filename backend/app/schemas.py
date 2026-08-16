@@ -361,6 +361,68 @@ class InternalTaskResponse(BaseModel):
     status: Literal["open", "completed"]
     created_at: datetime
 
+
+class DecisionPacketFact(BaseModel):
+    key: str
+    label: str
+    value: Any | None
+    display_value: str
+    missing: bool
+
+
+class DecisionPacketAttention(BaseModel):
+    title: str
+    guidance: str
+    blocking: bool = False
+
+
+class DecisionPacketArtifact(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    original_filename: str | None
+    content_type: str | None
+    byte_size: int
+
+
+class DecisionPacketReview(BaseModel):
+    id: uuid.UUID
+    status: ReviewStatus
+    reviewer: str | None
+    notes: str | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+
+class DecisionPacketActionResult(BaseModel):
+    status: Literal["succeeded", "failed"]
+    completed_at: datetime
+    message: str
+    task_id: uuid.UUID | None = None
+    task_title: str | None = None
+    queue: str | None = None
+    owner_role: str | None = None
+    task_created_at: datetime | None = None
+
+
+class DecisionPacketResponse(BaseModel):
+    review: DecisionPacketReview | None
+    work_item_id: uuid.UUID
+    title: str
+    status_label: str
+    document_type: str
+    confidence: float | None
+    confidence_band: Literal["High confidence", "Moderate confidence", "Low confidence"] | None
+    summary: str
+    key_information: list[DecisionPacketFact]
+    attention_items: list[DecisionPacketAttention]
+    artifacts: list[DecisionPacketArtifact]
+    action_plan: ActionPlanResponse | None
+    action_result: DecisionPacketActionResult | None
+    correction_schema: list[StructuredFieldDefinition]
+    correction_data: dict[str, Any]
+    technical: dict[str, Any]
+
 class DocumentProcessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profile_id: Literal["generic_office"] = "generic_office"

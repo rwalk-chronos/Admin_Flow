@@ -197,19 +197,24 @@ async function reviewQueue(status = state.reviewStatus) {
   }
   content.append(tabs, element("div", { className: "loading-state", text: "Loading reviews…" }));
   const reviews = await api(`/work-item-reviews?status=${encodeURIComponent(status)}`);
+  const packets = await Promise.all(reviews.map(async (review) => {
+    try { return await api(`/work-item-reviews/${review.id}/decision-packet`); } catch (_) { return null; }
+  }));
   clear(content.lastElementChild);
   content.lastElementChild.remove();
   const list = element("div", { className: "review-list" });
-  for (const review of reviews) {
+  reviews.forEach((review, index) => {
+    const packet = packets[index];
     const action = review.status === "pending" ? element("a", { className: "button", text: "Review", href: `#review/${review.id}` }) : badge(review.status);
+    const factPreview = packet?.key_information.slice(0, 2).map((fact) => element("span", { className: "data-chip", text: `${fact.label}: ${fact.display_value}` })) || [];
     list.append(element("article", { className: "card review-card" }, [
       element("div", {}, [
         element("p", { className: "row-title", text: review.title }),
-        element("div", { className: "row-meta" }, [element("span", { text: review.work_type }), element("span", { text: `Review state: ${titleCase(review.state)}` }), element("span", { text: formatDate(review.created_at) })]),
-        dataChips(review.work_item_data),
+        element("div", { className: "row-meta" }, [element("span", { text: packet ? `${packet.document_type}${packet.confidence_band ? ` · ${packet.confidence_band}` : ""}` : "Administrative review" }), element("span", { text: `Received ${formatDate(review.created_at)}` })]),
+        element("div", { className: "data-chips" }, factPreview),
       ]), action,
     ]));
-  }
+  });
   content.append(reviews.length ? list : emptyState(status === "pending" ? "No items need review." : `No ${status} reviews.`));
   if (status === "pending") navReviewCount.textContent = reviews.length ? String(reviews.length) : "";
 }
@@ -258,18 +263,19 @@ function attachmentPane(artifacts) {
   return card;
 }
 
-function structuredEditor(fieldSchema, values) {
+function structuredEditor(fieldSchema, values, facts = []) {
   const root = element("div");
   const readers = [];
+  const labels = new Map(facts.map((fact) => [fact.key, fact.label]));
   fieldSchema.forEach((definition, index) => {
     const current = Object.hasOwn(values, definition.name) ? values[definition.name] : null;
     const field = element("div", { className: "field" });
     const inputId = `structured-field-${index}`;
-    field.append(element("label", { text: `${definition.name}${definition.required ? " *" : ""}`, attrs: { for: inputId } }), element("p", { className: "field-hint", text: `${definition.description} · ${definition.type}` }));
+    field.append(element("label", { text: `${labels.get(definition.name) || titleCase(definition.name)}${definition.required ? " *" : ""}`, attrs: { for: inputId } }));
     let input;
     if (definition.type === "boolean") {
-      input = element("select", { id: inputId }, [element("option", { value: "true", text: "True" }), element("option", { value: "false", text: "False" })]);
-      input.value = current === false ? "false" : "true";
+      input = element("select", { id: inputId }, [!definition.required ? element("option", { value: "", text: "Not identified" }) : null, element("option", { value: "true", text: "Yes" }), element("option", { value: "false", text: "No" })]);
+      input.value = current === null ? "" : current === false ? "false" : "true";
     } else if (definition.type === "array_string") {
       input = element("textarea", { id: inputId, value: Array.isArray(current) ? current.join("\n") : "", attrs: { rows: "5" } });
     } else {
@@ -278,22 +284,13 @@ function structuredEditor(fieldSchema, values) {
       if (definition.type === "integer") input.step = "1";
       if (definition.type === "number") input.step = "any";
     }
-    let enabled = true;
-    if (!definition.required) {
-      enabled = current !== null;
-      const toggle = element("input", { type: "checkbox", attrs: { "aria-label": `Set ${definition.name}` } });
-      toggle.checked = enabled;
-      input.disabled = !enabled;
-      toggle.addEventListener("change", () => { enabled = toggle.checked; input.disabled = !enabled; });
-      field.append(element("label", { className: "optional-toggle" }, [toggle, document.createTextNode("Set optional value")]));
-    }
     field.append(input);
     root.append(field);
     readers.push(() => {
-      if (!definition.required && !enabled) return [definition.name, null];
-      if (definition.type === "string" || definition.type === "date") return [definition.name, input.value];
+      if (!definition.required && input.value.trim() === "") return [definition.name, null];
+      if (definition.type === "string" || definition.type === "date") return [definition.name, input.value.trim()];
       if (definition.type === "boolean") return [definition.name, input.value === "true"];
-      if (definition.type === "array_string") return [definition.name, input.value === "" ? [] : input.value.split(/\r?\n/)];
+      if (definition.type === "array_string") return [definition.name, input.value.trim() === "" ? (definition.required ? [] : null) : input.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)];
       const raw = input.value.trim();
       if (!raw) throw new Error(`${definition.name} must be a ${definition.type}.`);
       if (definition.type === "integer" && !/^-?\d+$/.test(raw)) throw new Error(`${definition.name} must be an integer.`);
@@ -323,80 +320,81 @@ async function reviewDetail(reviewId) {
   setActiveNav("reviews");
   clear();
   content.append(element("div", { className: "loading-state", text: "Loading review…" }));
-  const review = await api(`/work-item-reviews/${reviewId}`);
-  const workItem = await api(`/work-items/${review.work_item_id}`);
-  const [artifacts, structured] = await Promise.all([
-    api(`/intake-events/${workItem.intake_event_id}/artifacts`),
-    workItem.document_structured_extraction_id ? api(`/document-structured-extractions/${workItem.document_structured_extraction_id}`) : Promise.resolve(null),
-  ]);
-  const plans = await api(`/work-items/${workItem.id}/action-plans`);
-  let actionPlan = [...plans].reverse().find((plan) => !plan.superseded_at) || null;
+  let packet = await api(`/work-item-reviews/${reviewId}/decision-packet`);
+  const review = packet.review;
   clear();
-  content.append(pageHeader("Human review", workItem.title, "Compare the original source with the data AdminFlow will carry forward."));
-  const reviewCard = element("section", { className: "card review-pane" }, [element("div", { className: "card-header" }, [element("h2", { text: "AdminFlow review" }), badge(review.status)])]);
-  const form = element("form", { className: "review-form" });
-  form.append(element("dl", { className: "detail-grid" }, [detailItem("Work type", workItem.work_type), detailItem("State", workItem.current_state), detailItem("Version", workItem.version), detailItem("Received", formatDate(review.created_at))]));
-  const editor = structured ? structuredEditor(structured.field_schema, workItem.data) : genericEditor(workItem.data);
-  form.append(element("hr"), editor.root);
-  const planHost = element("section", { className: "action-plan-card" });
-  const drawPlan = () => {
-    clear(planHost);
-    if (!actionPlan) return;
-    planHost.append(element("p", { className: "eyebrow", text: "What will happen next" }), element("h3", { text: actionPlan.action_title }), element("p", { text: actionPlan.action_description }), element("p", { className: "external-effect", text: actionPlan.external_effect }));
-  };
-  drawPlan();
-  form.append(planHost);
+  content.append(pageHeader("Decision packet", packet.title, "Review what came in, what AdminFlow understood, and what approval will do."));
+  const reviewCard = element("section", { className: "card review-pane" });
+  const packetHost = element("div", { className: "decision-packet" });
   const reviewer = element("input", { id: "reviewer", value: getSavedReviewer(), attrs: { required: "", maxlength: "255", autocomplete: "name" } });
   const notes = element("textarea", { id: "review-notes", attrs: { maxlength: "2000", rows: "4" } });
-  form.append(element("div", { className: "field" }, [element("label", { text: "Reviewer *", attrs: { for: "reviewer" } }), reviewer]), element("div", { className: "field" }, [element("label", { text: "Notes", attrs: { for: "review-notes" } }), notes]));
-  const rejectButton = element("button", { className: "button secondary", text: actionPlan ? "Handle Manually" : "Reject", type: "button" });
-  const approveButton = element("button", { className: "button", text: actionPlan?.approval_label || "Approve", type: "button" });
-  const actions = element("div", { className: "action-row" }, [rejectButton, approveButton]);
-  if (review.status !== "pending") {
-    rejectButton.disabled = true;
-    approveButton.disabled = true;
-  }
-  form.append(actions);
-  reviewCard.append(form);
-  content.append(element("div", { className: "review-layout" }, [attachmentPane(artifacts), reviewCard]));
+  reviewCard.append(packetHost);
+  content.append(element("div", { className: "review-layout" }, [attachmentPane(packet.artifacts), reviewCard]));
+
+  const section = (label, children, className = "packet-section") => element("section", { className }, [element("h2", { text: label }), ...children]);
+  const factList = () => element("dl", { className: "fact-list" }, packet.key_information.map((fact) => element("div", { className: `fact-row${fact.missing ? " missing" : ""}` }, [element("dt", { text: fact.label }), element("dd", { text: fact.display_value })])));
+  const originalLink = () => packet.artifacts.length ? element("a", { className: "button secondary", text: "View Original Document", href: `/intake-artifacts/${packet.artifacts[0].id}/content`, attrs: { target: "_blank", rel: "noopener" } }) : element("p", { className: "muted", text: "No original document is available." });
 
   const resolve = async (decision) => {
-    if (!reviewer.value.trim()) { reviewer.focus(); showToast("Reviewer is required.", "error"); return; }
-    let reviewedData;
-    if (decision === "approve") {
-      try { reviewedData = editor.read(); } catch (error) { showToast(error.message, "error"); return; }
-      if (actionPlan && JSON.stringify(reviewedData) !== JSON.stringify(actionPlan.facts_snapshot)) {
-        try {
-          actionPlan = await api(`/work-item-reviews/${review.id}/action-plan`, { method: "POST", body: JSON.stringify({ expected_work_item_state: workItem.current_state, expected_work_item_version: workItem.version, reviewed_data: reviewedData }) });
-          drawPlan(); approveButton.textContent = actionPlan.approval_label;
-          showToast("The Action Plan was revised. Review what will happen next, then approve again.");
-          return;
-        } catch (error) { showToast(error.message, "error"); return; }
-      }
-    }
+    if (!reviewer.value.trim()) { reviewer.focus(); showToast("Your name is required.", "error"); return; }
     saveReviewer(reviewer.value.trim());
-    rejectButton.disabled = true;
-    approveButton.disabled = true;
     try {
-      await api(`/work-item-reviews/${review.id}/resolve`, { method: "POST", body: JSON.stringify({ decision, expected_work_item_state: workItem.current_state, expected_work_item_version: workItem.version, reviewer: reviewer.value.trim(), notes: notes.value.trim() || null, ...(decision === "approve" ? { reviewed_data: reviewedData, action_plan_id: actionPlan?.id || null } : {}) }) });
-      cleanupDocumentUrl();
-      state.dashboardDirty = true;
-      showToast(`Review ${decision === "approve" ? "approved" : "rejected"} successfully.`);
-      await updateReviewCount();
-      window.location.hash = "reviews";
+      await api(`/work-item-reviews/${review.id}/resolve`, { method: "POST", body: JSON.stringify({ decision, expected_work_item_state: packet.technical.state, expected_work_item_version: packet.technical.version, reviewer: reviewer.value.trim(), notes: notes.value.trim() || null, ...(decision === "approve" ? { reviewed_data: packet.correction_data, action_plan_id: packet.action_plan?.id || null } : {}) }) });
+      cleanupDocumentUrl(); state.dashboardDirty = true;
+      showToast(decision === "approve" ? "Approved and action completed." : "Moved to manual handling.");
+      await updateReviewCount(); window.location.hash = `work-item/${packet.work_item_id}`;
     } catch (error) {
-      if (error.status === 409) {
-        showToast("This item changed while you were reviewing it. Reloading the latest version.", "error");
-        await reviewDetail(reviewId);
-      } else {
-        showToast(error.message, "error");
-        rejectButton.disabled = false;
-        approveButton.disabled = false;
-      }
+      if (error.status === 409) { showToast("This item changed while you were reviewing it. Reloading the latest version.", "error"); await reviewDetail(reviewId); }
+      else showToast(error.message, "error");
     }
   };
-  approveButton.addEventListener("click", () => resolve("approve"));
-  rejectButton.addEventListener("click", () => resolve(actionPlan ? "handle_manually" : "reject"));
+
+  const drawReadMode = (updated = false) => {
+    clear(packetHost);
+    const identity = element("header", { className: "packet-identity" }, [element("div", { className: "document-meta", text: `${packet.document_type}${packet.confidence_band ? ` · ${packet.confidence_band}` : ""}${packet.confidence !== null ? ` · ${Math.round(packet.confidence * 100)}%` : ""}` }), element("p", { className: "status-line", text: packet.status_label })]);
+    if (updated) identity.append(element("div", { className: "notice", text: "Information updated. Review the revised action before approving." }));
+    const attention = packet.attention_items.length
+      ? element("ul", { className: "attention-list" }, packet.attention_items.map((item) => element("li", {}, [element("strong", { text: `⚠ ${item.title}` }), element("p", { text: item.guidance })])))
+      : element("p", { className: "all-clear", text: "✓ Nothing needs your attention." });
+    const plan = packet.action_plan
+      ? [element("h3", { text: packet.action_plan.action_title }), element("p", { text: packet.action_plan.action_description }), element("p", { className: "external-effect", text: packet.action_plan.external_effect })]
+      : [element("p", { text: "No automated next action is available. Choose manual handling." })];
+    const decisionChildren = [];
+    if (review.status === "pending") {
+      decisionChildren.push(element("div", { className: "decision-fields" }, [element("div", { className: "field" }, [element("label", { text: "Your name", attrs: { for: "reviewer" } }), reviewer]), element("div", { className: "field" }, [element("label", { text: "Optional note", attrs: { for: "review-notes" } }), notes])]), element("div", { className: "action-row decision-actions" }, [element("button", { className: "button quiet", text: "Correct Information", type: "button", attrs: { "data-action": "correct-information" } }), element("button", { className: "button secondary", text: packet.action_plan ? "Handle Manually" : "Reject", type: "button", attrs: { "data-action": "manual" } }), element("button", { className: "button", text: packet.action_plan?.approval_label || "Approve", type: "button", attrs: { "data-action": "approve", disabled: packet.action_plan ? null : "" } })]));
+    } else {
+      decisionChildren.push(element("p", { text: `${titleCase(review.status)}${review.reviewer ? ` by ${review.reviewer}` : ""}${review.resolved_at ? ` on ${formatDate(review.resolved_at)}` : ""}.` }));
+    }
+    packetHost.append(identity, section("Summary", [element("p", { className: "packet-summary", text: packet.summary })]), section("Needs your attention", [attention], "packet-section attention-section"), section("Key information", [factList()]), section("Original document", [originalLink()]), section("What will happen next", plan, "packet-section action-plan-card"), section("Your decision", decisionChildren, "packet-section decision-section"));
+    packetHost.querySelector('[data-action="correct-information"]')?.addEventListener("click", drawCorrectionMode);
+    packetHost.querySelector('[data-action="manual"]')?.addEventListener("click", () => resolve(packet.action_plan ? "handle_manually" : "reject"));
+    packetHost.querySelector('[data-action="approve"]')?.addEventListener("click", () => resolve("approve"));
+  };
+
+  const drawCorrectionMode = () => {
+    clear(packetHost);
+    const editor = packet.correction_schema.length ? structuredEditor(packet.correction_schema, packet.correction_data, packet.key_information) : genericEditor(packet.correction_data);
+    const cancel = element("button", { className: "button quiet", text: "Cancel", type: "button" });
+    const reviewChanges = element("button", { className: "button", text: "Review Changes", type: "button" });
+    packetHost.append(element("header", { className: "packet-identity" }, [element("div", { className: "eyebrow", text: "Correct information" }), element("h2", { text: "Update what AdminFlow will carry forward" }), element("p", { text: "Use the original document to correct any missing or inaccurate information." })]), element("div", { className: "correction-form" }, [editor.root, element("div", { className: "action-row" }, [cancel, reviewChanges])]));
+    cancel.addEventListener("click", () => drawReadMode());
+    reviewChanges.addEventListener("click", async () => {
+      let reviewedData;
+      try { reviewedData = editor.read(); } catch (error) { showToast(error.message, "error"); return; }
+      try {
+        if (packet.action_plan) {
+          await api(`/work-item-reviews/${review.id}/action-plan`, { method: "POST", body: JSON.stringify({ expected_work_item_state: packet.technical.state, expected_work_item_version: packet.technical.version, reviewed_data: reviewedData }) });
+          packet = await api(`/work-item-reviews/${review.id}/decision-packet`);
+        } else {
+          packet.correction_data = reviewedData;
+          packet.key_information = packet.key_information.map((fact) => ({ ...fact, value: reviewedData[fact.key], display_value: reviewedData[fact.key] ?? "Not identified", missing: reviewedData[fact.key] === null || reviewedData[fact.key] === "" }));
+        }
+        drawReadMode(true);
+      } catch (error) { showToast(error.message, "error"); }
+    });
+  };
+
+  drawReadMode();
 }
 
 function detailItem(label, value) {
@@ -438,6 +436,21 @@ async function workItemDetail(id) {
   const artifacts = await api(`/intake-events/${item.intake_event_id}/artifacts`);
   const executions = (await Promise.all(plans.map((plan) => api(`/action-plans/${plan.id}/executions`)))).flat();
   clear();
+  if (plans.length) {
+    const packet = await api(`/work-items/${id}/decision-packet`);
+    content.append(pageHeader("Administrative work", packet.title, "A permanent record of what came in, the human decision, and what happened.", element("a", { className: "button secondary", text: "Back to work items", href: "#work-items" })));
+    const statusCard = element("section", { className: "card packet-section status-card" }, [element("div", { className: "eyebrow", text: "Status" }), element("h2", { text: packet.status_label }), element("p", { className: "document-meta", text: `${packet.document_type}${packet.confidence_band ? ` · ${packet.confidence_band}` : ""}` })]);
+    const sourceCard = element("section", { className: "card packet-section" }, [element("h2", { text: "What came in" }), element("p", { className: "packet-summary", text: packet.summary }), artifacts.length ? element("a", { className: "button secondary", text: "View Original Document", href: `/intake-artifacts/${artifacts[0].id}/content`, attrs: { target: "_blank", rel: "noopener" } }) : element("p", { text: "No original document is available." })]);
+    const facts = element("section", { className: "card packet-section" }, [element("h2", { text: "Key information" }), element("dl", { className: "fact-list" }, packet.key_information.map((fact) => element("div", { className: "fact-row" }, [element("dt", { text: fact.label }), element("dd", { text: fact.display_value })]))) ]);
+    const result = packet.action_result;
+    const happened = element("section", { className: "card packet-section action-result" }, [element("h2", { text: "What happened" }), result ? element("div", {}, [element("h3", { text: result.message }), result.task_title ? element("p", { text: result.task_title }) : null, element("dl", { className: "detail-grid" }, [detailItem("Queue", result.queue), detailItem("Owner", result.owner_role), detailItem("Created", formatDate(result.task_created_at))])]) : element("p", { text: packet.status_label === "Manual handling" ? "The proposed Action Plan was not executed. This item was preserved for manual handling." : "No action result has been recorded." })]);
+    const reviewEntry = packet.review;
+    const reviewCard = element("section", { className: "card packet-section" }, [element("h2", { text: "Review" }), reviewEntry ? element("p", { text: `${titleCase(reviewEntry.status)}${reviewEntry.reviewer ? ` by ${reviewEntry.reviewer}` : ""}${reviewEntry.resolved_at ? ` on ${formatDate(reviewEntry.resolved_at)}` : ""}.` }) : element("p", { text: "No review record is available." }), reviewEntry?.notes ? element("p", { text: reviewEntry.notes }) : null]);
+    const actionCard = historyCard("Action history", plans.map((plan) => { const execution = executions.find((value) => value.action_plan_id === plan.id); return { title: plan.action_title, meta: execution ? `${titleCase(execution.status)} · ${formatDate(execution.completed_at)}` : plan.superseded_at ? "Superseded after corrected information" : "Not executed" }; }));
+    const technical = element("details", { className: "card technical-details" }, [element("summary", { text: "Technical details" }), element("div", { className: "card-body" }, [element("pre", { className: "data-view", text: JSON.stringify({ ...packet.technical, data: item.data, transitions }, null, 2) })])]);
+    content.append(element("div", { className: "section-stack cognitive-work-item" }, [statusCard, sourceCard, facts, happened, reviewCard, actionCard, technical]));
+    return;
+  }
   content.append(pageHeader("Work item", item.title, "Read-only workflow state, source lineage, and audit history.", element("a", { className: "button secondary", text: "Back to work items", href: "#work-items" })));
   const overview = element("section", { className: "card" }, [element("div", { className: "card-header" }, [element("h2", { text: "Details" }), badge(item.current_state)]), element("div", { className: "card-body" }, [element("dl", { className: "detail-grid" }, [detailItem("Work type", item.work_type), detailItem("Version", item.version), detailItem("Workflow definition", item.workflow_definition_id), detailItem("Intake event", item.intake_event_id), detailItem("Structured extraction", item.document_structured_extraction_id), detailItem("Updated", formatDate(item.updated_at))])])]);
   const data = element("section", { className: "card" }, [element("div", { className: "card-header" }, [element("h2", { text: "WorkItem data" })]), element("div", { className: "card-body" }, [element("pre", { className: "data-view", text: JSON.stringify(item.data, null, 2) })])]);

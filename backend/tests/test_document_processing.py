@@ -114,6 +114,39 @@ def test_pipeline_persists_atomic_lineage_review_and_is_idempotent(client, engin
         assert session.scalar(select(WorkflowDefinition)).name == "generic_document_review"
 
 
+def test_decision_packet_projects_human_type_summary_facts_attention_and_source(client, engine):
+    result = client.post(f"/document-extractions/{extraction(engine, 'FORM')}/process", json={}).json()
+    with Session(engine) as session:
+        classification = session.get(DocumentClassification, uuid.UUID(result["classification"]["id"]))
+        classification.confidence = 0.42
+        session.commit()
+    response = client.get(f"/work-item-reviews/{result['review_id']}/decision-packet")
+    assert response.status_code == 200, response.text
+    packet = response.json()
+    assert packet["document_type"] == "Form"
+    assert packet["confidence"] == 0.42
+    assert packet["confidence_band"] == "Low confidence"
+    assert packet["summary"] == "AdminFlow identified this as a form, but the main form details were not identified."
+    assert [fact["label"] for fact in packet["key_information"]] == ["Organization", "Document name", "Document date", "Subject", "Reference number"]
+    assert all(fact["display_value"] == "Not identified" and fact["missing"] for fact in packet["key_information"])
+    assert any("low confidence" in item["title"] for item in packet["attention_items"])
+    assert any(item["title"] == "Organization was not identified." for item in packet["attention_items"])
+    assert packet["action_plan"]["approval_label"] == "Approve & Create Task"
+    assert packet["action_plan"]["external_effect"] == "No external message will be sent."
+    assert packet["artifacts"][0]["original_filename"] == "invoice.pdf"
+    assert packet["correction_schema"][0]["name"] == "organization"
+
+
+@pytest.mark.parametrize(("confidence", "band"), [(0.85, "High confidence"), (0.60, "Moderate confidence"), (0.59, "Low confidence")])
+def test_decision_packet_confidence_thresholds_are_deterministic(client, engine, confidence, band):
+    result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
+    with Session(engine) as session:
+        classification = session.get(DocumentClassification, uuid.UUID(result["classification"]["id"]))
+        classification.confidence = confidence
+        session.commit()
+    assert client.get(f"/work-item-reviews/{result['review_id']}/decision-packet").json()["confidence_band"] == band
+
+
 def test_exact_action_plan_authorization_creates_one_internal_task(client, engine):
     result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
     review = client.get(f"/work-item-reviews/{result['review_id']}").json()
@@ -138,6 +171,11 @@ def test_exact_action_plan_authorization_creates_one_internal_task(client, engin
     assert approved.json()["current_state"] == "completed"
     assert len(client.get("/internal-tasks").json()) == 1
     assert client.get(f"/action-plans/{plan['id']}/executions").json()[0]["status"] == "succeeded"
+    completed_packet = client.get(f"/work-items/{review['work_item_id']}/decision-packet").json()
+    assert completed_packet["status_label"] == "Completed"
+    assert completed_packet["action_result"]["message"] == "Internal task created successfully"
+    assert completed_packet["action_result"]["queue"] == "Accounts Payable"
+    assert completed_packet["review"]["reviewer"] == "office-user"
     duplicate = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
         "decision": "approve", "expected_work_item_state": review["state"],
         "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",
@@ -159,8 +197,19 @@ def test_correction_revises_plan_and_manual_path_executes_nothing(client, engine
     })
     assert revised.status_code == 200
     assert revised.json()["revision"] == 2
+    revised_packet = client.get(f"/work-item-reviews/{review['id']}/decision-packet").json()
+    assert revised_packet["correction_data"]["amount_due"] == 200.0
+    assert next(fact for fact in revised_packet["key_information"] if fact["key"] == "amount_due")["display_value"] == "$200.00"
+    assert revised_packet["action_plan"]["id"] == revised.json()["id"]
     plans = client.get(f"/work-items/{review['work_item_id']}/action-plans").json()
     assert plans[0]["superseded_reason"] == "Reviewed facts changed"
+    stale_approval = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "approve", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",
+        "reviewed_data": corrected, "action_plan_id": plans[0]["id"],
+    })
+    assert stale_approval.status_code == 409
+    assert stale_approval.json()["detail"] == "Approval must authorize the exact current Action Plan"
     handled = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
         "decision": "handle_manually", "expected_work_item_state": review["state"],
         "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",

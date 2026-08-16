@@ -8,6 +8,8 @@ AdminFlow has local manual intake merged to `main` and a validated dual-mode doc
 
 PR #13 implementation on `feature/action-plan-foundation` adds immutable deterministic Action Plans, exact human authorization, safe correction revisions, connectorless internal-task execution, a Handle Manually route, execution audit lineage, and an action-aware review UI. Migration `20260816_0010` adds `action_plans`, `action_executions`, `internal_tasks`, and the review authorization reference.
 
+The PR #13 correction pass adds a computed Decision Packet API and replaces the technical edit-first review screen with a cognitive, read-first experience. Human document type/confidence, deterministic summary, readable facts, attention items, source access, next action, explicit correction review, and completed action results are primary; engine identifiers remain available only under technical details. This projection requires no schema migration and no additional AI call.
+
 Last feature merge:
 
 - PR #11 — `Add local manual intake experience` — merged to `main`
