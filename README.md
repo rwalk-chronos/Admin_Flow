@@ -259,7 +259,7 @@ curl -X POST \
   }'
 ```
 
-The immutable `DocumentStructuredExtraction` stores source lineage, the exact requested field-definition snapshot, validated extracted data, and provider/model/prompt metadata. Application code validates the exact field set, required/null behavior, scalar types, real ISO calendar dates, and string-array elements after every provider response. Structured extraction does not create WorkItems, transition workflow state, or trigger actions.
+The immutable `DocumentStructuredExtraction` stores source lineage, the exact requested field-definition snapshot, validated extracted data, an optional explanatory document summary, and provider/model/prompt metadata. In OpenAI mode, the existing structured extraction request returns both the strict application-defined facts and a concise grounded summary in one structured response—there is no additional summarization request. Application code validates the exact field set, required/null behavior, scalar types, real ISO calendar dates, string-array elements, and summary bounds after every provider response. The summary remains separate from `extracted_data`, is explanatory only, and never controls a WorkItem, Action Plan, transition, or execution.
 
 ## WorkItems and deterministic workflows
 
@@ -319,7 +319,7 @@ The reviewer value is an application-supplied audit identifier in this V1 founda
 
 The application-owned `generic_office` processing profile creates an immutable, connectorless `create_internal_task` Action Plan alongside its review. The review screen explains exactly what approval will do, discloses that no external message will be sent, keeps the original document visible, and requires authorization of the exact current plan ID and facts snapshot.
 
-`GET /work-item-reviews/{id}/decision-packet` provides the human-facing review projection without adding another persisted record or AI request. It follows immutable classification and extraction lineage server-side and returns a plain-language document type and confidence band, deterministic summary, readable key information, attention items, original artifacts, current Action Plan presentation, and the correction contract. The browser defaults to this read-first Decision Packet; correction inputs appear only after **Correct Information**, and **Review Changes** revises the immutable Action Plan before authorization is offered again.
+`GET /work-item-reviews/{id}/decision-packet` provides the human-facing review projection without adding another persisted record or AI request. It follows immutable classification and extraction lineage server-side and returns a plain-language document type and confidence band, persisted AI summary when available, readable key information, attention items, original artifacts, current Action Plan presentation, and the correction contract. Local-stub and historical records with no persisted summary use an explicitly identified deterministic fallback and are never presented as AI-generated. The browser defaults to this read-first Decision Packet; correction inputs appear only after **Correct Information**, and **Review Changes** revises the immutable Action Plan before authorization is offered again. Reviewed facts remain authoritative for deterministic actions; correcting facts does not rewrite the immutable source summary.
 
 If reviewed facts change, `POST /work-item-reviews/{id}/action-plan` validates them and creates a new immutable revision; the previous plan is retained as superseded. Approval creates one `ActionExecution` and one `InternalTask` transactionally using the Action Plan as the idempotency identity. Approval, execution success, and workflow transitions remain separate audit facts. **Handle Manually** preserves the source and review context without executing the plan.
 
@@ -369,7 +369,7 @@ AdminFlow defaults to fully local deterministic processing:
 AI_PROVIDER=stub
 ```
 
-The local stub makes no external requests. It deterministically matches the application-owned `generic_office` taxonomy (`invoice`, `correspondence`, `form`, or `other`) and extracts ordinary labeled fields using the profile's constrained field definitions.
+The local stub makes no external requests. It deterministically matches the application-owned `generic_office` taxonomy (`invoice`, `correspondence`, `form`, or `other`) and extracts ordinary labeled fields using the profile's constrained field definitions. It does not pretend to generate an AI summary; the Decision Packet uses and labels its deterministic fallback.
 
 To use the existing OpenAI Responses API adapters instead:
 

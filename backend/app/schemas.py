@@ -159,6 +159,7 @@ class DocumentStructuredExtractionResponse(BaseModel):
     document_classification_id: uuid.UUID | None
     field_schema: list[StructuredFieldDefinition]
     extracted_data: dict[str, Any]
+    summary: str | None
     provider_name: str
     model_name: str
     prompt_version: str
@@ -414,6 +415,7 @@ class DecisionPacketResponse(BaseModel):
     confidence: float | None
     confidence_band: Literal["High confidence", "Moderate confidence", "Low confidence"] | None
     summary: str
+    summary_source: Literal["ai", "deterministic_fallback"]
     key_information: list[DecisionPacketFact]
     attention_items: list[DecisionPacketAttention]
     artifacts: list[DecisionPacketArtifact]

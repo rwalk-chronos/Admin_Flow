@@ -244,6 +244,7 @@ class DocumentStructuredExtraction(Base):
     extracted_data: Mapped[dict[str, Any]] = mapped_column(
         JSON().with_variant(JSONB, "postgresql"), nullable=False
     )
+    summary: Mapped[str | None] = mapped_column(Text)
     provider_name: Mapped[str] = mapped_column(String(50), nullable=False)
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(50), nullable=False)

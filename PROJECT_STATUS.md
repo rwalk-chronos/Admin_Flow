@@ -10,6 +10,8 @@ PR #13 implementation on `feature/action-plan-foundation` adds immutable determi
 
 The PR #13 correction pass adds a computed Decision Packet API and replaces the technical edit-first review screen with a cognitive, read-first experience. Human document type/confidence, deterministic summary, readable facts, attention items, source access, next action, explicit correction review, and completed action results are primary; engine identifiers remain available only under technical details. This projection requires no schema migration and no additional AI call.
 
+The follow-up summary correction extends the existing OpenAI structured extraction response to return strict facts plus a concise grounded administrative summary in the same request. Migration `20260816_0011` persists the optional immutable summary on `DocumentStructuredExtraction`; legacy and local-stub rows remain `NULL` and use an explicitly labeled deterministic fallback. Summary prose is explanatory only and has no authority over reviewed facts, Action Plans, routing, workflow state, or execution.
+
 Last feature merge:
 
 - PR #11 — `Add local manual intake experience` — merged to `main`

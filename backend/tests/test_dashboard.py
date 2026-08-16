@@ -117,6 +117,8 @@ def test_review_ui_explains_and_authorizes_exact_action_plan() -> None:
     assert "Review Changes" in source
     assert "Information updated. Review the revised action before approving." in source
     assert "Technical details" in source
+    assert "AI-generated summary" in source
+    assert "Basic summary" in source
 
 
 def test_review_defaults_to_decision_packet_not_technical_editor() -> None:
@@ -132,6 +134,7 @@ def test_review_defaults_to_decision_packet_not_technical_editor() -> None:
     assert "Set optional value" not in source
     assert "form_review" not in read_mode
     assert "needs_review" not in read_mode
+    assert read_mode.index('section("Key information"') < read_mode.index('section("Needs your attention"')
 
 
 def test_completed_action_work_item_prioritizes_outcome_over_technical_details() -> None:

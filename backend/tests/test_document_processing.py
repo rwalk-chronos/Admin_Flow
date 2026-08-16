@@ -127,14 +127,36 @@ def test_decision_packet_projects_human_type_summary_facts_attention_and_source(
     assert packet["confidence"] == 0.42
     assert packet["confidence_band"] == "Low confidence"
     assert packet["summary"] == "AdminFlow identified this as a form, but the main form details were not identified."
+    assert packet["summary_source"] == "deterministic_fallback"
     assert [fact["label"] for fact in packet["key_information"]] == ["Organization", "Document name", "Document date", "Subject", "Reference number"]
     assert all(fact["display_value"] == "Not identified" and fact["missing"] for fact in packet["key_information"])
     assert any("low confidence" in item["title"] for item in packet["attention_items"])
-    assert any(item["title"] == "Organization was not identified." for item in packet["attention_items"])
+    missing_attention = next(item for item in packet["attention_items"] if item["title"] == "Several details were not identified.")
+    assert "organization, document name, document date, subject, or reference number" in missing_attention["guidance"]
+    assert len(packet["attention_items"]) == 2
     assert packet["action_plan"]["approval_label"] == "Approve & Create Task"
     assert packet["action_plan"]["external_effect"] == "No external message will be sent."
     assert packet["artifacts"][0]["original_filename"] == "invoice.pdf"
     assert packet["correction_schema"][0]["name"] == "organization"
+
+
+def test_decision_packet_uses_persisted_ai_summary_without_provider_read_call(client, engine):
+    result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
+    expected = "Invoice from Example Office Supply for office materials, due September 15, 2026."
+    with Session(engine) as session:
+        structured = session.get(DocumentStructuredExtraction, uuid.UUID(result["structured_extraction"]["id"]))
+        structured.summary = expected
+        session.commit()
+    class MustNotRun:
+        def __getattr__(self, name): raise AssertionError("Decision Packet reads must not call a provider")
+    app.dependency_overrides[get_document_classifier] = MustNotRun
+    app.dependency_overrides[get_document_structured_extractor] = MustNotRun
+    packet = client.get(f"/work-item-reviews/{result['review_id']}/decision-packet").json()
+    assert packet["summary"] == expected
+    assert packet["summary_source"] == "ai"
+    assert packet["correction_data"] == result["structured_extraction"]["extracted_data"]
+    assert "summary" not in packet["action_plan"]["facts_snapshot"]
+    assert "summary" not in packet["action_plan"]["payload"]["facts"]
 
 
 @pytest.mark.parametrize(("confidence", "band"), [(0.85, "High confidence"), (0.60, "Moderate confidence"), (0.59, "Low confidence")])

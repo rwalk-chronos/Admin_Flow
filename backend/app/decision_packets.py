@@ -109,6 +109,15 @@ def _summary(label: str, title: str, data: dict[str, Any], event) -> str:
     return "General office document received for review."
 
 
+def _join_labels(labels: list[str]) -> str:
+    lowered = [label[:1].lower() + label[1:] for label in labels]
+    if len(lowered) == 1:
+        return lowered[0]
+    if len(lowered) == 2:
+        return f"{lowered[0]} or {lowered[1]}"
+    return f"{', '.join(lowered[:-1])}, or {lowered[-1]}"
+
+
 def build_decision_packet(session: Session, item: WorkItem, review: WorkItemReview | None) -> dict[str, Any]:
     structured = item.document_structured_extraction
     classification = structured.document_classification if structured else None
@@ -142,8 +151,8 @@ def build_decision_packet(session: Session, item: WorkItem, review: WorkItemRevi
         attention.append({"title": f"AdminFlow has low confidence this is a {document_type}.", "guidance": "Compare the original document before relying on this classification.", "blocking": False})
     missing_facts = [fact for fact in facts if fact["missing"]]
     if missing_facts:
-        for fact in missing_facts:
-            attention.append({"title": f"{fact['label']} was not identified.", "guidance": "Check the original document if this information is needed.", "blocking": False})
+        labels = [fact["label"] for fact in missing_facts]
+        attention.append({"title": "Several details were not identified." if len(labels) > 1 else f"{labels[0]} was not identified.", "guidance": f"AdminFlow could not identify {_join_labels(labels)}. Compare {'these items' if len(labels) > 1 else 'this item'} with the original before approving.", "blocking": False})
     if plan is None and review and review.status == "pending":
         attention.append({"title": "The next action is not available.", "guidance": "Handle this item manually or ask an administrator to check the workflow configuration.", "blocking": True})
     execution = session.scalar(select(ActionExecution).where(ActionExecution.action_plan_id == plan.id)) if plan else None
@@ -169,7 +178,8 @@ def build_decision_packet(session: Session, item: WorkItem, review: WorkItemRevi
         "document_type": document_type,
         "confidence": confidence,
         "confidence_band": confidence_band(confidence) if confidence is not None else None,
-        "summary": _summary(label, item.title, data, item.intake_event),
+        "summary": structured.summary if structured and structured.summary else _summary(label, item.title, data, item.intake_event),
+        "summary_source": "ai" if structured and structured.summary else "deterministic_fallback",
         "key_information": facts,
         "attention_items": attention,
         "artifacts": artifacts,

@@ -11,7 +11,7 @@ from app.db import get_session
 from app.document_classifications import get_document_classifier
 from app.document_classifier import ClassificationProviderError, DocumentClassifier
 from app.document_structured_extractions import get_document_structured_extractor
-from app.document_structured_extractor import DocumentStructuredExtractor, StructuredExtractionProviderError, validate_extracted_data
+from app.document_structured_extractor import DocumentStructuredExtractor, StructuredExtractionProviderError, validate_extracted_data, validate_summary
 from app.models import ActionPlan, DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
 from app.action_plans import build_internal_task_plan
 from app.schemas import ClassificationCandidate, DocumentProcessRequest, DocumentProcessResponse, DocumentProcessingConfigResponse, StructuredFieldDefinition, WorkflowDefinitionCreate
@@ -124,6 +124,7 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
         fields = GENERIC_OFFICE.fields_by_label[classified.label]
         extracted = extractor.extract(text=extraction.text_content, fields=fields, classification_context={"label": classified.label, "rationale": classified.rationale})
         data = validate_extracted_data(fields, extracted.data)
+        summary = validate_summary(getattr(extracted, "summary", None))
     except (ClassificationProviderError, StructuredExtractionProviderError) as exc:
         session.rollback()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -155,7 +156,7 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
     extraction = locked_extraction
     classification = DocumentClassification(document_extraction_id=extraction.id, candidate_labels=[item.model_dump(mode="json") for item in GENERIC_OFFICE.candidates], provider_name=classifier.provider_name, model_name=classifier.model_name, prompt_version=classifier.prompt_version, label=classified.label, confidence=classified.confidence, rationale=classified.rationale)
     session.add(classification); session.flush()
-    structured = DocumentStructuredExtraction(document_extraction_id=extraction.id, document_classification_id=classification.id, field_schema=[item.model_dump(mode="json") for item in fields], extracted_data=data, provider_name=extractor.provider_name, model_name=extractor.model_name, prompt_version=extractor.prompt_version)
+    structured = DocumentStructuredExtraction(document_extraction_id=extraction.id, document_classification_id=classification.id, field_schema=[item.model_dump(mode="json") for item in fields], extracted_data=data, summary=summary, provider_name=extractor.provider_name, model_name=extractor.model_name, prompt_version=extractor.prompt_version)
     session.add(structured); session.flush()
     item = WorkItem(workflow_definition_id=workflow.id, intake_event_id=extraction.intake_artifact.intake_event_id, document_structured_extraction_id=structured.id, work_type=GENERIC_OFFICE.work_types[classified.label], title=_title(data, extraction, classified.label), data=dict(data), current_state=workflow.initial_state, version=1)
     session.add(item); session.flush()
