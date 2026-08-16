@@ -2,7 +2,7 @@
 
 AdminFlow is a local-first administrative workflow engine. It is designed to turn incoming unstructured information into structured, reviewable work items while keeping workflow state and business rules deterministic.
 
-> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral document processing, a deterministic WorkItem workflow, human review, and a basic local dashboard. It is not a production-ready AdminFlow application and does not yet contain actions, timers, permissions, authentication, or production connectors.
+> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral document processing, a deterministic WorkItem workflow, human review, deterministic Action Plans, native internal tasks, and a local dashboard. It is not a production-ready AdminFlow application and does not yet contain timers, permissions, authentication, or production connectors.
 
 ## Architecture
 
@@ -313,7 +313,25 @@ curl -X POST \
 
 Approval may include corrected `reviewed_data`. For WorkItems backed by a `DocumentStructuredExtraction`, corrections are deterministically validated against its exact persisted field schema; the immutable source extraction is never changed. Rejection never changes WorkItem data. Review resolution locks the WorkItem, uses the existing deterministic transition engine, and atomically persists the decision, WorkItem state/version, and immutable transition history.
 
-The reviewer value is an application-supplied audit identifier in this V1 foundation. Authentication, RBAC, notifications, timers, and actions are not implemented. AI never approves, rejects, or changes workflow state.
+The reviewer value is an application-supplied audit identifier in this V1 foundation. Authentication, RBAC, notifications, and timers are not implemented. AI never approves, rejects, chooses an action, or changes workflow state.
+
+## Action Plans and internal tasks
+
+The application-owned `generic_office` processing profile creates an immutable, connectorless `create_internal_task` Action Plan alongside its review. The review screen explains exactly what approval will do, discloses that no external message will be sent, keeps the original document visible, and requires authorization of the exact current plan ID and facts snapshot.
+
+If reviewed facts change, `POST /work-item-reviews/{id}/action-plan` validates them and creates a new immutable revision; the previous plan is retained as superseded. Approval creates one `ActionExecution` and one `InternalTask` transactionally using the Action Plan as the idempotency identity. Approval, execution success, and workflow transitions remain separate audit facts. **Handle Manually** preserves the source and review context without executing the plan.
+
+Action history is available through the WorkItem detail screen and these APIs:
+
+```text
+GET /work-items/{id}/action-plans
+GET /action-plans/{id}
+GET /action-plans/{id}/executions
+GET /internal-tasks
+GET /internal-tasks/{id}
+```
+
+No email, fax, calendar, EHR, CRM, or other external connector is invoked by this action slice.
 
 ## Local dashboard
 

@@ -329,6 +329,8 @@ async function reviewDetail(reviewId) {
     api(`/intake-events/${workItem.intake_event_id}/artifacts`),
     workItem.document_structured_extraction_id ? api(`/document-structured-extractions/${workItem.document_structured_extraction_id}`) : Promise.resolve(null),
   ]);
+  const plans = await api(`/work-items/${workItem.id}/action-plans`);
+  let actionPlan = [...plans].reverse().find((plan) => !plan.superseded_at) || null;
   clear();
   content.append(pageHeader("Human review", workItem.title, "Compare the original source with the data AdminFlow will carry forward."));
   const reviewCard = element("section", { className: "card review-pane" }, [element("div", { className: "card-header" }, [element("h2", { text: "AdminFlow review" }), badge(review.status)])]);
@@ -336,11 +338,19 @@ async function reviewDetail(reviewId) {
   form.append(element("dl", { className: "detail-grid" }, [detailItem("Work type", workItem.work_type), detailItem("State", workItem.current_state), detailItem("Version", workItem.version), detailItem("Received", formatDate(review.created_at))]));
   const editor = structured ? structuredEditor(structured.field_schema, workItem.data) : genericEditor(workItem.data);
   form.append(element("hr"), editor.root);
+  const planHost = element("section", { className: "action-plan-card" });
+  const drawPlan = () => {
+    clear(planHost);
+    if (!actionPlan) return;
+    planHost.append(element("p", { className: "eyebrow", text: "What will happen next" }), element("h3", { text: actionPlan.action_title }), element("p", { text: actionPlan.action_description }), element("p", { className: "external-effect", text: actionPlan.external_effect }));
+  };
+  drawPlan();
+  form.append(planHost);
   const reviewer = element("input", { id: "reviewer", value: getSavedReviewer(), attrs: { required: "", maxlength: "255", autocomplete: "name" } });
   const notes = element("textarea", { id: "review-notes", attrs: { maxlength: "2000", rows: "4" } });
   form.append(element("div", { className: "field" }, [element("label", { text: "Reviewer *", attrs: { for: "reviewer" } }), reviewer]), element("div", { className: "field" }, [element("label", { text: "Notes", attrs: { for: "review-notes" } }), notes]));
-  const rejectButton = element("button", { className: "button danger", text: "Reject", type: "button" });
-  const approveButton = element("button", { className: "button", text: "Approve", type: "button" });
+  const rejectButton = element("button", { className: "button secondary", text: actionPlan ? "Handle Manually" : "Reject", type: "button" });
+  const approveButton = element("button", { className: "button", text: actionPlan?.approval_label || "Approve", type: "button" });
   const actions = element("div", { className: "action-row" }, [rejectButton, approveButton]);
   if (review.status !== "pending") {
     rejectButton.disabled = true;
@@ -355,12 +365,20 @@ async function reviewDetail(reviewId) {
     let reviewedData;
     if (decision === "approve") {
       try { reviewedData = editor.read(); } catch (error) { showToast(error.message, "error"); return; }
+      if (actionPlan && JSON.stringify(reviewedData) !== JSON.stringify(actionPlan.facts_snapshot)) {
+        try {
+          actionPlan = await api(`/work-item-reviews/${review.id}/action-plan`, { method: "POST", body: JSON.stringify({ expected_work_item_state: workItem.current_state, expected_work_item_version: workItem.version, reviewed_data: reviewedData }) });
+          drawPlan(); approveButton.textContent = actionPlan.approval_label;
+          showToast("The Action Plan was revised. Review what will happen next, then approve again.");
+          return;
+        } catch (error) { showToast(error.message, "error"); return; }
+      }
     }
     saveReviewer(reviewer.value.trim());
     rejectButton.disabled = true;
     approveButton.disabled = true;
     try {
-      await api(`/work-item-reviews/${review.id}/resolve`, { method: "POST", body: JSON.stringify({ decision, expected_work_item_state: workItem.current_state, expected_work_item_version: workItem.version, reviewer: reviewer.value.trim(), notes: notes.value.trim() || null, ...(decision === "approve" ? { reviewed_data: reviewedData } : {}) }) });
+      await api(`/work-item-reviews/${review.id}/resolve`, { method: "POST", body: JSON.stringify({ decision, expected_work_item_state: workItem.current_state, expected_work_item_version: workItem.version, reviewer: reviewer.value.trim(), notes: notes.value.trim() || null, ...(decision === "approve" ? { reviewed_data: reviewedData, action_plan_id: actionPlan?.id || null } : {}) }) });
       cleanupDocumentUrl();
       state.dashboardDirty = true;
       showToast(`Review ${decision === "approve" ? "approved" : "rejected"} successfully.`);
@@ -378,7 +396,7 @@ async function reviewDetail(reviewId) {
     }
   };
   approveButton.addEventListener("click", () => resolve("approve"));
-  rejectButton.addEventListener("click", () => resolve("reject"));
+  rejectButton.addEventListener("click", () => resolve(actionPlan ? "handle_manually" : "reject"));
 }
 
 function detailItem(label, value) {
@@ -416,14 +434,17 @@ async function workItemDetail(id) {
   setActiveNav("work-items");
   clear();
   content.append(element("div", { className: "loading-state", text: "Loading work item…" }));
-  const [item, transitions, reviews] = await Promise.all([api(`/work-items/${id}`), api(`/work-items/${id}/transitions`), api(`/work-items/${id}/reviews`)]);
+  const [item, transitions, reviews, plans] = await Promise.all([api(`/work-items/${id}`), api(`/work-items/${id}/transitions`), api(`/work-items/${id}/reviews`), api(`/work-items/${id}/action-plans`)]);
+  const artifacts = await api(`/intake-events/${item.intake_event_id}/artifacts`);
+  const executions = (await Promise.all(plans.map((plan) => api(`/action-plans/${plan.id}/executions`)))).flat();
   clear();
   content.append(pageHeader("Work item", item.title, "Read-only workflow state, source lineage, and audit history.", element("a", { className: "button secondary", text: "Back to work items", href: "#work-items" })));
   const overview = element("section", { className: "card" }, [element("div", { className: "card-header" }, [element("h2", { text: "Details" }), badge(item.current_state)]), element("div", { className: "card-body" }, [element("dl", { className: "detail-grid" }, [detailItem("Work type", item.work_type), detailItem("Version", item.version), detailItem("Workflow definition", item.workflow_definition_id), detailItem("Intake event", item.intake_event_id), detailItem("Structured extraction", item.document_structured_extraction_id), detailItem("Updated", formatDate(item.updated_at))])])]);
   const data = element("section", { className: "card" }, [element("div", { className: "card-header" }, [element("h2", { text: "WorkItem data" })]), element("div", { className: "card-body" }, [element("pre", { className: "data-view", text: JSON.stringify(item.data, null, 2) })])]);
   const transitionCard = historyCard("Transition history", transitions.map((entry) => ({ title: `Version ${entry.version}: ${titleCase(entry.from_state || "Created")} → ${titleCase(entry.to_state)}`, meta: `${formatDate(entry.created_at)}${entry.reason ? ` · ${entry.reason}` : ""}` })));
   const reviewCard = historyCard("Review history", reviews.map((entry) => ({ title: `${titleCase(entry.status)} in ${titleCase(entry.state)}`, meta: `${formatDate(entry.created_at)}${entry.reviewer ? ` · ${entry.reviewer}` : ""}` })));
-  content.append(element("div", { className: "section-stack" }, [overview, data, transitionCard, reviewCard]));
+  const actionCard = historyCard("Action history", plans.map((plan) => { const execution = executions.find((value) => value.action_plan_id === plan.id); return { title: `${plan.action_title} · revision ${plan.revision}`, meta: execution ? `${titleCase(execution.status)} · ${formatDate(execution.completed_at)}` : plan.superseded_at ? "Superseded before authorization" : "Awaiting authorization" }; }));
+  content.append(element("div", { className: "section-stack" }, [overview, attachmentPane(artifacts), data, actionCard, transitionCard, reviewCard]));
 }
 
 function historyCard(title, entries) {

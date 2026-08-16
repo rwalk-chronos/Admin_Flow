@@ -12,11 +12,13 @@ from app.document_structured_extractor import (
     validate_extracted_data,
 )
 from app.models import (
+    ActionPlan,
     WorkItem,
     WorkItemReview,
     WorkItemTransition,
     WorkflowDefinition,
 )
+from app.action_plans import execute_internal_task
 from app.schemas import (
     StructuredFieldDefinition,
     WorkItemReviewResolve,
@@ -69,6 +71,7 @@ def _response(review: WorkItemReview) -> dict:
         "current_state": item.current_state,
         "current_version": item.version,
         "work_item_data": item.data,
+        "authorized_action_plan_id": review.authorized_action_plan_id,
     }
 
 
@@ -193,6 +196,26 @@ def resolve_review(
                     detail="reviewed_data does not match the structured extraction field schema",
                 ) from exc
 
+        active_plan = session.scalar(
+            select(ActionPlan).where(
+                ActionPlan.work_item_id == item.id,
+                ActionPlan.superseded_at.is_(None),
+            ).order_by(ActionPlan.revision.desc())
+        )
+        if active_plan is not None:
+            if request.action_plan_id != active_plan.id:
+                session.rollback()
+                raise HTTPException(status_code=409, detail="Approval must authorize the exact current Action Plan")
+            if active_plan.work_item_state != item.current_state or active_plan.work_item_version != item.version:
+                session.rollback()
+                raise HTTPException(status_code=409, detail="Action Plan is stale")
+            if active_plan.facts_snapshot != approved_data:
+                session.rollback()
+                raise HTTPException(status_code=409, detail="Reviewed facts require a revised Action Plan")
+        elif request.action_plan_id is not None:
+            session.rollback()
+            raise HTTPException(status_code=409, detail="Action Plan does not belong to this review")
+
     try:
         result = apply_transition(
             item,
@@ -212,6 +235,8 @@ def resolve_review(
     review.reviewer = request.reviewer
     review.notes = request.notes
     review.reviewed_data = approved_data
+    if request.decision == "approve" and active_plan is not None:
+        review.authorized_action_plan_id = active_plan.id
     review.resolved_at = datetime.now(timezone.utc)
     transition = WorkItemTransition(
         work_item_id=item.id,
@@ -221,6 +246,22 @@ def resolve_review(
         reason=request.notes,
     )
     session.add(transition)
+    if request.decision == "approve" and active_plan is not None:
+        execution = execute_internal_task(session, active_plan)
+        result_state = "completed" if execution.status == "succeeded" else "action_needs_attention"
+        try:
+            execution_transition = apply_transition(
+                item, workflow, expected_state=item.current_state,
+                expected_version=item.version, to_state=result_state,
+            )
+        except WorkflowTransitionConflict as exc:
+            session.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        session.add(WorkItemTransition(
+            work_item_id=item.id, version=execution_transition.version,
+            from_state=execution_transition.from_state, to_state=execution_transition.to_state,
+            reason=f"Action execution {execution.status}",
+        ))
     create_pending_review_if_required(session, item, workflow)
     session.commit()
     session.refresh(review)

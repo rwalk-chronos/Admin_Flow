@@ -301,6 +301,10 @@ class WorkItem(Base):
     reviews: Mapped[list["WorkItemReview"]] = relationship(
         back_populates="work_item", order_by="WorkItemReview.created_at"
     )
+    action_plans: Mapped[list["ActionPlan"]] = relationship(
+        back_populates="work_item", order_by="ActionPlan.revision"
+    )
+    internal_tasks: Mapped[list["InternalTask"]] = relationship(back_populates="work_item")
 
 
 class WorkItemTransition(Base):
@@ -364,8 +368,86 @@ class WorkItemReview(Base):
     reviewed_data: Mapped[dict[str, Any] | None] = mapped_column(
         JSON().with_variant(JSONB, "postgresql")
     )
+    authorized_action_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("action_plans.id", use_alter=True), index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     work_item: Mapped[WorkItem] = relationship(back_populates="reviews")
+    authorized_action_plan: Mapped["ActionPlan | None"] = relationship(
+        foreign_keys=[authorized_action_plan_id]
+    )
+
+
+class ActionPlan(Base):
+    __tablename__ = "action_plans"
+    __table_args__ = (
+        CheckConstraint("revision >= 1", name="ck_action_plans_revision"),
+        CheckConstraint("action_type IN ('create_internal_task')", name="ck_action_plans_type"),
+        UniqueConstraint("work_item_id", "revision", name="uq_action_plans_item_revision"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("work_items.id"), nullable=False, index=True)
+    work_item_state: Mapped[str] = mapped_column(String(64), nullable=False)
+    work_item_version: Mapped[int] = mapped_column(nullable=False)
+    workflow_definition_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflow_definitions.id"), nullable=False)
+    workflow_definition_version: Mapped[int] = mapped_column(nullable=False)
+    intake_event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("intake_events.id"), nullable=False)
+    revision: Mapped[int] = mapped_column(nullable=False)
+    action_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    facts_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    destination: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    source_artifact_ids: Mapped[list[str]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    action_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    action_description: Mapped[str] = mapped_column(Text, nullable=False)
+    approval_label: Mapped[str] = mapped_column(String(100), nullable=False)
+    external_effect: Mapped[str] = mapped_column(String(255), nullable=False)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_reason: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    work_item: Mapped[WorkItem] = relationship(back_populates="action_plans")
+    executions: Mapped[list["ActionExecution"]] = relationship(back_populates="action_plan")
+
+
+class ActionExecution(Base):
+    __tablename__ = "action_executions"
+    __table_args__ = (
+        CheckConstraint("status IN ('succeeded', 'failed')", name="ck_action_executions_status"),
+        UniqueConstraint("action_plan_id", name="uq_action_executions_plan"),
+        UniqueConstraint("idempotency_key", name="uq_action_executions_idempotency"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action_plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("action_plans.id"), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    result: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    action_plan: Mapped[ActionPlan] = relationship(back_populates="executions")
+    internal_task: Mapped["InternalTask | None"] = relationship(back_populates="action_execution", uselist=False)
+
+
+class InternalTask(Base):
+    __tablename__ = "internal_tasks"
+    __table_args__ = (
+        CheckConstraint("status IN ('open', 'completed')", name="ck_internal_tasks_status"),
+        UniqueConstraint("action_execution_id", name="uq_internal_tasks_execution"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    action_execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("action_executions.id"), nullable=False, index=True)
+    work_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("work_items.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    queue: Mapped[str] = mapped_column(String(100), nullable=False)
+    owner_role: Mapped[str | None] = mapped_column(String(100))
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    facts_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    source_artifact_ids: Mapped[list[str]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", server_default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    action_execution: Mapped[ActionExecution] = relationship(back_populates="internal_task")
+    work_item: Mapped[WorkItem] = relationship(back_populates="internal_tasks")

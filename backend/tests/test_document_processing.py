@@ -13,7 +13,7 @@ from app.document_classifier import LocalStubDocumentClassifier
 from app.document_structured_extractions import get_document_structured_extractor
 from app.document_structured_extractor import LocalStubDocumentStructuredExtractor, StructuredExtractionProviderError, validate_extracted_data
 from app.main import app
-from app.models import Base, DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
+from app.models import ActionExecution, ActionPlan, Base, DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, InternalTask, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
 from app.schemas import ClassificationCandidate, StructuredFieldDefinition
 
 
@@ -112,6 +112,65 @@ def test_pipeline_persists_atomic_lineage_review_and_is_idempotent(client, engin
         review = session.scalar(select(WorkItemReview))
         assert review.id == uuid.UUID(body["review_id"]) and review.status == "pending"
         assert session.scalar(select(WorkflowDefinition)).name == "generic_document_review"
+
+
+def test_exact_action_plan_authorization_creates_one_internal_task(client, engine):
+    result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
+    review = client.get(f"/work-item-reviews/{result['review_id']}").json()
+    plan = client.get(f"/action-plans/{result['action_plan_id']}").json()
+    assert plan["action_type"] == "create_internal_task"
+    assert plan["external_effect"] == "No external message will be sent."
+    assert len(plan["source_artifact_ids"]) == 1
+
+    missing = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "approve", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",
+        "reviewed_data": review["work_item_data"],
+    })
+    assert missing.status_code == 409
+    approved = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "approve", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",
+        "reviewed_data": review["work_item_data"], "action_plan_id": plan["id"],
+    })
+    assert approved.status_code == 201, approved.text
+    assert approved.json()["authorized_action_plan_id"] == plan["id"]
+    assert approved.json()["current_state"] == "completed"
+    assert len(client.get("/internal-tasks").json()) == 1
+    assert client.get(f"/action-plans/{plan['id']}/executions").json()[0]["status"] == "succeeded"
+    duplicate = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "approve", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",
+        "reviewed_data": review["work_item_data"], "action_plan_id": plan["id"],
+    })
+    assert duplicate.status_code == 409
+    with Session(engine) as session:
+        assert session.scalar(select(func.count(ActionExecution.id))) == 1
+        assert session.scalar(select(func.count(InternalTask.id))) == 1
+
+
+def test_correction_revises_plan_and_manual_path_executes_nothing(client, engine):
+    result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
+    review = client.get(f"/work-item-reviews/{result['review_id']}").json()
+    corrected = dict(review["work_item_data"]); corrected["amount_due"] = 200.0
+    revised = client.post(f"/work-item-reviews/{review['id']}/action-plan", json={
+        "expected_work_item_state": review["state"], "expected_work_item_version": review["work_item_version"],
+        "reviewed_data": corrected,
+    })
+    assert revised.status_code == 200
+    assert revised.json()["revision"] == 2
+    plans = client.get(f"/work-items/{review['work_item_id']}/action-plans").json()
+    assert plans[0]["superseded_reason"] == "Reviewed facts changed"
+    handled = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "handle_manually", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",
+        "notes": "Will complete outside AdminFlow",
+    })
+    assert handled.status_code == 201, handled.text
+    assert handled.json()["current_state"] == "manual_handling"
+    assert client.get("/internal-tasks").json() == []
+    with Session(engine) as session:
+        assert session.scalar(select(func.count(ActionPlan.id))) == 2
 
 
 def test_pipeline_errors_and_provider_failure_persist_nothing(client, engine):

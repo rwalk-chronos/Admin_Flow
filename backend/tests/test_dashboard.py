@@ -102,3 +102,12 @@ def test_manual_intake_uses_server_owned_processing_profile_and_review_routing()
     assert "field_schema" not in source
     assert "workflow_definition" not in source
     assert "provider-select" not in source
+
+
+def test_review_ui_explains_and_authorizes_exact_action_plan() -> None:
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "What will happen next" in source
+    assert "Handle Manually" in source
+    assert "action_plan_id: actionPlan?.id" in source
+    assert "The Action Plan was revised" in source
+    assert "attachmentPane(artifacts)" in source

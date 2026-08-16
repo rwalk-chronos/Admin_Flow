@@ -73,7 +73,7 @@ def validate_workflow_graph(
         if not state.review_required:
             continue
         decisions = decisions_by_state[state.name]
-        if decisions.count("reject") > 1 or len(decisions) != len(set(decisions)):
+        if len(decisions) != len(set(decisions)):
             raise WorkflowDefinitionError(
                 "review decisions from a state must be unique"
             )

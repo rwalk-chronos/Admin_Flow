@@ -179,7 +179,7 @@ class WorkflowTransitionDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     from_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
     to_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
-    review_decision: Literal["approve", "reject"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    review_decision: Literal["approve", "reject", "handle_manually"] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class WorkflowDefinitionCreate(BaseModel):
@@ -270,12 +270,13 @@ ReviewDecision = Literal["approve", "reject"]
 class WorkItemReviewResolve(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision: ReviewDecision
+    decision: Literal["approve", "reject", "handle_manually"]
     expected_work_item_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
     expected_work_item_version: int = Field(ge=1)
     reviewer: str = Field(min_length=1, max_length=255)
     notes: str | None = Field(default=None, max_length=2000)
     reviewed_data: dict[str, Any] | None = None
+    action_plan_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def reviewer_must_not_be_blank(self) -> "WorkItemReviewResolve":
@@ -300,6 +301,65 @@ class WorkItemReviewResponse(BaseModel):
     current_state: str
     current_version: int
     work_item_data: dict[str, Any]
+    authorized_action_plan_id: uuid.UUID | None = None
+
+
+class ActionPlanRevise(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_work_item_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    expected_work_item_version: int = Field(ge=1)
+    reviewed_data: dict[str, Any]
+
+
+class ActionPlanResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    work_item_id: uuid.UUID
+    work_item_state: str
+    work_item_version: int
+    workflow_definition_id: uuid.UUID
+    workflow_definition_version: int
+    intake_event_id: uuid.UUID
+    revision: int
+    action_type: Literal["create_internal_task"]
+    facts_snapshot: dict[str, Any]
+    destination: dict[str, Any]
+    payload: dict[str, Any]
+    source_artifact_ids: list[str]
+    action_title: str
+    action_description: str
+    approval_label: str
+    external_effect: str
+    superseded_at: datetime | None
+    superseded_reason: str | None
+    created_at: datetime
+
+
+class ActionExecutionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    action_plan_id: uuid.UUID
+    idempotency_key: str
+    status: Literal["succeeded", "failed"]
+    result: dict[str, Any]
+    error_message: str | None
+    attempted_at: datetime
+    completed_at: datetime
+
+
+class InternalTaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    action_execution_id: uuid.UUID
+    work_item_id: uuid.UUID
+    title: str
+    queue: str
+    owner_role: str | None
+    due_at: datetime | None
+    facts_snapshot: dict[str, Any]
+    source_artifact_ids: list[str]
+    status: Literal["open", "completed"]
+    created_at: datetime
 
 class DocumentProcessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -327,3 +387,4 @@ class DocumentProcessResponse(BaseModel):
     structured_extraction: DocumentStructuredExtractionResponse
     work_item: WorkItemResponse
     review_id: uuid.UUID
+    action_plan_id: uuid.UUID | None = None

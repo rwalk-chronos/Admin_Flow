@@ -12,7 +12,8 @@ from app.document_classifications import get_document_classifier
 from app.document_classifier import ClassificationProviderError, DocumentClassifier
 from app.document_structured_extractions import get_document_structured_extractor
 from app.document_structured_extractor import DocumentStructuredExtractor, StructuredExtractionProviderError, validate_extracted_data
-from app.models import DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
+from app.models import ActionPlan, DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
+from app.action_plans import build_internal_task_plan
 from app.schemas import ClassificationCandidate, DocumentProcessRequest, DocumentProcessResponse, DocumentProcessingConfigResponse, StructuredFieldDefinition, WorkflowDefinitionCreate
 from app.work_item_reviews import create_pending_review_if_required
 
@@ -49,10 +50,10 @@ GENERIC_OFFICE = ProcessingProfile(
 )
 
 WORKFLOW_PAYLOAD = WorkflowDefinitionCreate.model_validate({
-    "name": "generic_document_review", "version": 1, "description": "Generic deterministic document review workflow",
-    "states": [{"name": "needs_review", "terminal": False, "review_required": True}, {"name": "completed", "terminal": True}, {"name": "rejected", "terminal": True}],
+    "name": "generic_document_review", "version": 2, "description": "Generic deterministic document review and internal task workflow",
+    "states": [{"name": "needs_review", "terminal": False, "review_required": True}, {"name": "approved_for_action", "terminal": False}, {"name": "completed", "terminal": True}, {"name": "action_needs_attention", "terminal": True}, {"name": "manual_handling", "terminal": True}],
     "initial_state": "needs_review",
-    "transitions": [{"from_state": "needs_review", "to_state": "completed", "review_decision": "approve"}, {"from_state": "needs_review", "to_state": "rejected", "review_decision": "reject"}],
+    "transitions": [{"from_state": "needs_review", "to_state": "approved_for_action", "review_decision": "approve"}, {"from_state": "needs_review", "to_state": "manual_handling", "review_decision": "handle_manually"}, {"from_state": "approved_for_action", "to_state": "completed"}, {"from_state": "approved_for_action", "to_state": "action_needs_attention"}],
 })
 
 
@@ -64,13 +65,13 @@ def ensure_generic_review_workflow(session: Session) -> WorkflowDefinition:
         if workflow.initial_state != WORKFLOW_PAYLOAD.initial_state or workflow.states != states or workflow.transitions != transitions:
             raise HTTPException(status_code=409, detail="Reserved generic review workflow is incompatible")
         return workflow
-    workflow = WorkflowDefinition(name=WORKFLOW_PAYLOAD.name, version=1, description=WORKFLOW_PAYLOAD.description, states=states, initial_state=WORKFLOW_PAYLOAD.initial_state, transitions=transitions)
+    workflow = WorkflowDefinition(name=WORKFLOW_PAYLOAD.name, version=WORKFLOW_PAYLOAD.version, description=WORKFLOW_PAYLOAD.description, states=states, initial_state=WORKFLOW_PAYLOAD.initial_state, transitions=transitions)
     session.add(workflow)
     try:
         session.flush()
     except IntegrityError:
         session.rollback()
-        workflow = session.scalar(select(WorkflowDefinition).where(WorkflowDefinition.name == WORKFLOW_PAYLOAD.name, WorkflowDefinition.version == 1))
+        workflow = session.scalar(select(WorkflowDefinition).where(WorkflowDefinition.name == WORKFLOW_PAYLOAD.name, WorkflowDefinition.version == WORKFLOW_PAYLOAD.version))
         if workflow is None:
             raise
         if workflow.states != states or workflow.transitions != transitions:
@@ -79,13 +80,14 @@ def ensure_generic_review_workflow(session: Session) -> WorkflowDefinition:
 
 
 def _existing_result(session: Session, extraction_id: uuid.UUID):
-    statement = select(WorkItem).join(DocumentStructuredExtraction).join(WorkflowDefinition).where(DocumentStructuredExtraction.document_extraction_id == extraction_id, WorkflowDefinition.name == WORKFLOW_PAYLOAD.name, WorkflowDefinition.version == 1).order_by(WorkItem.created_at.asc())
+    statement = select(WorkItem).join(DocumentStructuredExtraction).join(WorkflowDefinition).where(DocumentStructuredExtraction.document_extraction_id == extraction_id, WorkflowDefinition.name == WORKFLOW_PAYLOAD.name, WorkflowDefinition.version == WORKFLOW_PAYLOAD.version).order_by(WorkItem.created_at.asc())
     item = session.scalar(statement)
     if not item: return None
     structured = item.document_structured_extraction
     classification = structured.document_classification
     review = session.scalar(select(WorkItemReview).where(WorkItemReview.work_item_id == item.id).order_by(WorkItemReview.created_at.asc()))
-    return classification, structured, item, review
+    plan = session.scalar(select(ActionPlan).where(ActionPlan.work_item_id == item.id, ActionPlan.superseded_at.is_(None)))
+    return classification, structured, item, review, plan
 
 
 def _title(data: dict, extraction: DocumentExtraction, label: str) -> str:
@@ -113,8 +115,8 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
     if request.profile_id != GENERIC_OFFICE.id: raise HTTPException(status_code=404, detail="Document processing profile not found")
     existing = _existing_result(session, extraction.id)
     if existing:
-        classification, structured, item, review = existing
-        return {"profile_id": request.profile_id, "provider_name": classification.provider_name, "reused": True, "classification": classification, "structured_extraction": structured, "work_item": item, "review_id": review.id}
+        classification, structured, item, review, plan = existing
+        return {"profile_id": request.profile_id, "provider_name": classification.provider_name, "reused": True, "classification": classification, "structured_extraction": structured, "work_item": item, "review_id": review.id, "action_plan_id": plan.id if plan else None}
     try:
         classified = classifier.classify(text=extraction.text_content, candidate_labels=GENERIC_OFFICE.candidates)
         labels = {item.name for item in GENERIC_OFFICE.candidates}
@@ -138,7 +140,7 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
         raise HTTPException(status_code=404, detail="Document extraction not found")
     existing = _existing_result(session, locked_extraction.id)
     if existing:
-        classification, structured, item, review = existing
+        classification, structured, item, review, plan = existing
         session.rollback()
         return {
             "profile_id": request.profile_id,
@@ -147,7 +149,7 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
             "classification": classification,
             "structured_extraction": structured,
             "work_item": item,
-            "review_id": review.id,
+            "review_id": review.id, "action_plan_id": plan.id if plan else None,
         }
 
     extraction = locked_extraction
@@ -160,5 +162,7 @@ def process_document(extraction_id: uuid.UUID, request: DocumentProcessRequest, 
     session.add(WorkItemTransition(work_item_id=item.id, version=1, from_state=None, to_state=workflow.initial_state, reason=None))
     review = create_pending_review_if_required(session, item, workflow)
     if review is None: session.rollback(); raise HTTPException(status_code=500, detail="Processing workflow did not create a review")
+    plan = build_internal_task_plan(session, item, data, revision=1)
+    session.add(plan)
     session.commit(); session.refresh(classification); session.refresh(structured); session.refresh(item); session.refresh(review)
-    return {"profile_id": request.profile_id, "provider_name": classifier.provider_name, "reused": False, "classification": classification, "structured_extraction": structured, "work_item": item, "review_id": review.id}
+    return {"profile_id": request.profile_id, "provider_name": classifier.provider_name, "reused": False, "classification": classification, "structured_extraction": structured, "work_item": item, "review_id": review.id, "action_plan_id": plan.id}

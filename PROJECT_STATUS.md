@@ -1,10 +1,12 @@
 # AdminFlow Project Status
 
-Status captured: 2026-08-15
+Status captured: 2026-08-16
 
 ## Current state
 
 AdminFlow has local manual intake merged to `main` and a validated dual-mode document processing pipeline on the `feature/dual-mode-processing` branch. The same application-owned pipeline uses either a zero-network deterministic local stub or the existing OpenAI adapters.
+
+PR #13 implementation on `feature/action-plan-foundation` adds immutable deterministic Action Plans, exact human authorization, safe correction revisions, connectorless internal-task execution, a Handle Manually route, execution audit lineage, and an action-aware review UI. Migration `20260816_0010` adds `action_plans`, `action_executions`, `internal_tasks`, and the review authorization reference.
 
 Last feature merge:
 

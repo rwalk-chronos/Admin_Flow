@@ -98,6 +98,9 @@ input:disabled, select:disabled, textarea:disabled { color: #788590; background:
 .attachment-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .attachment-toolbar .field { flex: 1; min-width: 200px; margin: 0; }
 .review-form { padding: 20px; }
+.action-plan-card { margin: 20px 0; padding: 18px; border: 2px solid var(--blue); border-radius: 9px; background: var(--blue-soft); }
+.action-plan-card h3 { margin: 4px 0 8px; }
+.external-effect { font-weight: 680; }
 .action-row { display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px; }
 .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 22px; }
 .detail-item dt { margin-bottom: 3px; color: var(--muted); font-size: .77rem; font-weight: 680; text-transform: uppercase; letter-spacing: .04em; }
