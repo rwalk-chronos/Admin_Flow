@@ -2,7 +2,7 @@
 
 AdminFlow is a local-first administrative workflow engine. It is designed to turn incoming unstructured information into structured, reviewable work items while keeping workflow state and business rules deterministic.
 
-> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral document processing, a deterministic WorkItem workflow, human review, and a basic local dashboard. It is not a production-ready AdminFlow application and does not yet contain actions, timers, permissions, authentication, or production connectors.
+> **Development bootstrap:** This repository currently contains a runnable backend, PostgreSQL persistence, health checks, migration infrastructure, domain-neutral document processing, a deterministic WorkItem workflow, human review, deterministic Action Plans, native internal tasks, and a local dashboard. It is not a production-ready AdminFlow application and does not yet contain timers, permissions, authentication, or production connectors.
 
 ## Architecture
 
@@ -259,7 +259,9 @@ curl -X POST \
   }'
 ```
 
-The immutable `DocumentStructuredExtraction` stores source lineage, the exact requested field-definition snapshot, validated extracted data, and provider/model/prompt metadata. Application code validates the exact field set, required/null behavior, scalar types, real ISO calendar dates, and string-array elements after every provider response. Structured extraction does not create WorkItems, transition workflow state, or trigger actions.
+The immutable `DocumentStructuredExtraction` stores source lineage, the exact requested field-definition snapshot, validated extracted data, an optional explanatory document summary, and provider/model/prompt metadata. In OpenAI mode, the existing structured extraction request returns both the strict application-defined facts and a concise grounded summary in one structured response—there is no additional summarization request. Application code validates the exact field set, required/null behavior, scalar types, real ISO calendar dates, string-array elements, and summary bounds after every provider response. The summary remains separate from `extracted_data`, is explanatory only, and never controls a WorkItem, Action Plan, transition, or execution.
+
+AI summaries are administrative summaries. They describe the document, its source/context, and explicit administrative purpose or requested action. They do not provide domain-expert interpretation of substantive document contents. The provider is asked for one to three short paragraphs separated by blank lines; AdminFlow normalizes and persists those paragraph boundaries as plain text and renders them as readable paragraphs. One-paragraph and legacy summaries remain valid.
 
 ## WorkItems and deterministic workflows
 
@@ -313,7 +315,32 @@ curl -X POST \
 
 Approval may include corrected `reviewed_data`. For WorkItems backed by a `DocumentStructuredExtraction`, corrections are deterministically validated against its exact persisted field schema; the immutable source extraction is never changed. Rejection never changes WorkItem data. Review resolution locks the WorkItem, uses the existing deterministic transition engine, and atomically persists the decision, WorkItem state/version, and immutable transition history.
 
-The reviewer value is an application-supplied audit identifier in this V1 foundation. Authentication, RBAC, notifications, timers, and actions are not implemented. AI never approves, rejects, or changes workflow state.
+The reviewer value is an application-supplied audit identifier in this V1 foundation. Authentication, RBAC, notifications, and timers are not implemented. AI never approves, rejects, chooses an action, or changes workflow state.
+
+## Action Plans and internal tasks
+
+The application-owned `generic_office` processing profile creates an immutable, connectorless `create_internal_task` Action Plan alongside its review. The review screen explains exactly what approval will do, discloses that no external message will be sent, keeps the original document visible, and requires authorization of the exact current plan ID and facts snapshot.
+
+`GET /work-item-reviews/{id}/decision-packet` provides the human-facing review projection without adding another persisted record or AI request. It follows immutable classification and extraction lineage server-side and returns a plain-language document type and confidence band, persisted AI summary when available, readable key information, attention items, original artifacts, current Action Plan presentation, and the correction contract. Local-stub and historical records with no persisted summary use an explicitly identified deterministic fallback and are never presented as AI-generated. The browser defaults to this read-first Decision Packet; correction inputs appear only after **Correct Information**, and **Review Changes** revises the immutable Action Plan before authorization is offered again. Reviewed facts remain authoritative for deterministic actions; correcting facts does not rewrite the immutable source summary.
+
+If reviewed facts change, `POST /work-item-reviews/{id}/action-plan` validates them and creates a new immutable revision; the previous plan is retained as superseded. Approval creates one `ActionExecution` and one open `InternalTask` transactionally using the Action Plan as the idempotency identity. New generic documents use immutable workflow version 3: successful task creation moves the WorkItem to `awaiting_task_completion`, and `POST /internal-tasks/{id}/complete` records the completing human, time, and optional note while atomically moving the WorkItem to `completed`. Action execution success and business-work completion are separate facts. Legacy version-2 WorkItems retain their historical transitions; an open legacy task linked to an already-completed WorkItem can receive completion metadata without another WorkItem transition. **Handle Manually** preserves the source and review context without executing the plan.
+
+The deterministic V1 handoff is Queue + Responsible Role. Approval places the task in that queue for the stated organizational role; it does not imply a named-person assignment. Named assignees, authentication, staffing rules, and role administration remain future work. Open tasks are listed with due tasks first and then oldest-created first; omitting the status filter preserves the existing newest-created-first list behavior.
+
+Action history is available through the WorkItem detail screen and these APIs:
+
+```text
+GET /work-items/{id}/action-plans
+GET /action-plans/{id}
+GET /action-plans/{id}/executions
+GET /internal-tasks
+GET /internal-tasks/{id}
+POST /internal-tasks/{id}/complete
+GET /work-item-reviews/{id}/decision-packet
+GET /work-items/{id}/decision-packet
+```
+
+No email, fax, calendar, EHR, CRM, or other external connector is invoked by this action slice.
 
 ## Local dashboard
 
@@ -323,7 +350,8 @@ The dashboard provides:
 
 - an overview of pending reviews, open and terminal WorkItems, and recent intake
 - an oldest-first human review queue with approved and rejected history filters
-- split-screen source-document preview and schema-aware review editing
+- split-screen source-document preview and read-first Decision Packet with optional correction mode
+- open/completed task queues, cognitive task detail, original-document access, and human task completion
 - read-only WorkItem state, lineage, transition, and review history
 - recent IntakeEvents and immutable artifact viewing
 
@@ -347,7 +375,7 @@ AdminFlow defaults to fully local deterministic processing:
 AI_PROVIDER=stub
 ```
 
-The local stub makes no external requests. It deterministically matches the application-owned `generic_office` taxonomy (`invoice`, `correspondence`, `form`, or `other`) and extracts ordinary labeled fields using the profile's constrained field definitions.
+The local stub makes no external requests. It deterministically matches the application-owned `generic_office` taxonomy (`invoice`, `correspondence`, `form`, or `other`) and extracts ordinary labeled fields using the profile's constrained field definitions. It does not pretend to generate an AI summary; the Decision Packet uses and labels its deterministic fallback.
 
 To use the existing OpenAI Responses API adapters instead:
 

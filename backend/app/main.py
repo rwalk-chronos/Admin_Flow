@@ -5,7 +5,9 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
+from app.action_plans import router as action_plans_router
 from app.db import database_is_ready
+from app.decision_packets import router as decision_packets_router
 from app.document_classifications import router as document_classifications_router
 from app.document_extractions import router as document_extractions_router
 from app.document_structured_extractions import (
@@ -20,6 +22,8 @@ from app.work_item_reviews import router as work_item_reviews_router
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
+app.include_router(action_plans_router)
+app.include_router(decision_packets_router)
 app.include_router(document_classifications_router)
 app.include_router(document_extractions_router)
 app.include_router(document_structured_extractions_router)

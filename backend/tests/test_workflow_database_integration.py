@@ -12,11 +12,15 @@ from sqlalchemy.orm import Session
 from app.db import get_engine
 from app.main import app
 from app.models import (
+    ActionExecution,
+    ActionPlan,
     DocumentExtraction,
     DocumentStructuredExtraction,
     IntakeArtifact,
     IntakeEvent,
+    InternalTask,
     WorkItem,
+    WorkItemReview,
     WorkItemTransition,
     WorkflowDefinition,
 )
@@ -33,12 +37,16 @@ def require_integration_database() -> None:
 @pytest.fixture
 def clean_workflows() -> Generator[None, None, None]:
     with Session(get_engine()) as session:
+        session.execute(delete(InternalTask)); session.execute(delete(ActionExecution)); session.execute(delete(ActionPlan))
+        session.execute(delete(WorkItemReview))
         session.execute(delete(WorkItemTransition))
         session.execute(delete(WorkItem))
         session.execute(delete(WorkflowDefinition))
         session.commit()
     yield
     with Session(get_engine()) as session:
+        session.execute(delete(InternalTask)); session.execute(delete(ActionExecution)); session.execute(delete(ActionPlan))
+        session.execute(delete(WorkItemReview))
         session.execute(delete(WorkItemTransition))
         session.execute(delete(WorkItem))
         session.execute(delete(WorkflowDefinition))

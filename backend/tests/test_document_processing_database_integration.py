@@ -14,7 +14,7 @@ from app.document_classifier import ClassificationResult, LocalStubDocumentClass
 from app.document_structured_extractions import get_document_structured_extractor
 from app.document_structured_extractor import LocalStubDocumentStructuredExtractor
 from app.main import app
-from app.models import DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
+from app.models import ActionExecution, ActionPlan, DocumentClassification, DocumentExtraction, DocumentStructuredExtraction, IntakeArtifact, IntakeEvent, InternalTask, WorkItem, WorkItemReview, WorkItemTransition, WorkflowDefinition
 
 pytestmark = pytest.mark.integration
 
@@ -46,18 +46,54 @@ def test_postgresql_complete_stub_pipeline_atomic_lineage_and_idempotency():
         with TestClient(app) as client:
             first = client.post(f"/document-extractions/{extraction_id}/process", json={})
             second = client.post(f"/document-extractions/{extraction_id}/process", json={})
+            review = client.get(f"/work-item-reviews/{first.json()['review_id']}").json()
+            approved = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+                "decision": "approve", "expected_work_item_state": review["state"],
+                "expected_work_item_version": review["work_item_version"], "reviewer": "integration-reviewer",
+                "reviewed_data": review["work_item_data"], "action_plan_id": first.json()["action_plan_id"],
+            })
+            task = client.get("/internal-tasks?status=open").json()[0]
+            completed = client.post(
+                f"/internal-tasks/{task['id']}/complete",
+                json={"completed_by": "integration-worker", "completion_note": "PostgreSQL completion"},
+            )
+            repeated = client.post(
+                f"/internal-tasks/{task['id']}/complete",
+                json={"completed_by": "different-worker", "completion_note": "Must not overwrite"},
+            )
     finally:
         app.dependency_overrides.clear()
     assert first.status_code == second.status_code == 201
+    assert approved.status_code == 201
+    assert approved.json()["current_state"] == "awaiting_task_completion"
+    assert completed.status_code == repeated.status_code == 200
+    assert completed.json() == repeated.json()
+    assert completed.json()["completed_by"] == "integration-worker"
     assert first.json()["reused"] is False and second.json()["reused"] is True
     with Session(get_engine()) as session:
         item = session.get(WorkItem, first.json()["work_item"]["id"])
         assert item.data["invoice_number"] == "PG-1001"
         assert item.document_structured_extraction.document_extraction_id == extraction_id
-        assert len(list(session.scalars(select(WorkItemTransition).where(WorkItemTransition.work_item_id == item.id)))) == 1
+        assert (item.current_state, item.version) == ("completed", 4)
+        transitions = list(session.scalars(select(WorkItemTransition).where(WorkItemTransition.work_item_id == item.id).order_by(WorkItemTransition.version)))
+        assert [(row.version, row.to_state) for row in transitions] == [
+            (1, "needs_review"),
+            (2, "approved_for_action"),
+            (3, "awaiting_task_completion"),
+            (4, "completed"),
+        ]
         review = session.scalar(select(WorkItemReview).where(WorkItemReview.work_item_id == item.id))
-        assert review.status == "pending" and review.state == "needs_review"
+        assert review.status == "approved" and review.state == "needs_review"
+        plan = session.scalar(select(ActionPlan).where(ActionPlan.work_item_id == item.id))
+        assert plan.action_type == "create_internal_task"
+        task_row = session.scalar(select(InternalTask).where(InternalTask.work_item_id == item.id))
+        assert (task_row.status, task_row.completed_by, task_row.completion_note) == (
+            "completed", "integration-worker", "PostgreSQL completion",
+        )
+        session.execute(delete(InternalTask).where(InternalTask.work_item_id == item.id))
+        session.execute(delete(ActionExecution).where(ActionExecution.action_plan_id == plan.id))
         session.execute(delete(WorkItemReview).where(WorkItemReview.work_item_id == item.id))
+        session.execute(delete(ActionPlan).where(ActionPlan.work_item_id == item.id))
         session.execute(delete(WorkItemTransition).where(WorkItemTransition.work_item_id == item.id))
         session.execute(delete(WorkItem).where(WorkItem.id == item.id))
         session.execute(delete(DocumentStructuredExtraction).where(DocumentStructuredExtraction.document_extraction_id == extraction_id))
@@ -120,7 +156,11 @@ def test_postgresql_concurrent_processing_is_idempotent():
         assert (source.status, source.text_content, source.character_count) == source_snapshot
         assert (source_artifact.sha256, source_artifact.storage_key, source_artifact.byte_size) == artifact_snapshot
 
+        plan_ids = select(ActionPlan.id).where(ActionPlan.work_item_id == items[0].id)
+        session.execute(delete(InternalTask).where(InternalTask.work_item_id == items[0].id))
+        session.execute(delete(ActionExecution).where(ActionExecution.action_plan_id.in_(plan_ids)))
         session.execute(delete(WorkItemReview).where(WorkItemReview.work_item_id == items[0].id))
+        session.execute(delete(ActionPlan).where(ActionPlan.work_item_id == items[0].id))
         session.execute(delete(WorkItemTransition).where(WorkItemTransition.work_item_id == items[0].id))
         session.execute(delete(WorkItem).where(WorkItem.id == items[0].id))
         session.execute(delete(DocumentStructuredExtraction).where(DocumentStructuredExtraction.document_extraction_id == extraction_id))

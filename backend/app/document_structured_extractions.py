@@ -14,6 +14,7 @@ from app.document_structured_extractor import (
     OpenAIDocumentStructuredExtractor,
     StructuredExtractionProviderError,
     validate_extracted_data,
+    validate_summary,
 )
 from app.models import (
     DocumentClassification,
@@ -92,6 +93,7 @@ def create_document_structured_extraction(
                 "AI structured extractor returned invalid structured data"
             )
         extracted_data = validate_extracted_data(request.fields, provider_result.data)
+        summary = validate_summary(getattr(provider_result, "summary", None))
     except StructuredExtractionProviderError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -100,6 +102,7 @@ def create_document_structured_extraction(
         document_classification_id=(classification.id if classification else None),
         field_schema=[field.model_dump(mode="json") for field in request.fields],
         extracted_data=extracted_data,
+        summary=summary,
         provider_name=extractor.provider_name,
         model_name=extractor.model_name,
         prompt_version=extractor.prompt_version,

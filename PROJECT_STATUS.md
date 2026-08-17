@@ -1,10 +1,20 @@
 # AdminFlow Project Status
 
-Status captured: 2026-08-15
+Status captured: 2026-08-16
 
 ## Current state
 
 AdminFlow has local manual intake merged to `main` and a validated dual-mode document processing pipeline on the `feature/dual-mode-processing` branch. The same application-owned pipeline uses either a zero-network deterministic local stub or the existing OpenAI adapters.
+
+PR #13 implementation on `feature/action-plan-foundation` adds immutable deterministic Action Plans, exact human authorization, safe correction revisions, connectorless internal-task execution, a Handle Manually route, execution audit lineage, and an action-aware review UI. Migration `20260816_0010` adds `action_plans`, `action_executions`, `internal_tasks`, and the review authorization reference.
+
+The PR #13 correction pass adds a computed Decision Packet API and replaces the technical edit-first review screen with a cognitive, read-first experience. Human document type/confidence, deterministic summary, readable facts, attention items, source access, next action, explicit correction review, and completed action results are primary; engine identifiers remain available only under technical details. This projection requires no schema migration and no additional AI call.
+
+The follow-up summary correction extends the existing OpenAI structured extraction response to return strict facts plus a concise grounded administrative summary in the same request. Migration `20260816_0011` persists the optional immutable summary on `DocumentStructuredExtraction`; legacy and local-stub rows remain `NULL` and use an explicitly labeled deterministic fallback. Summary prose is explanatory only and has no authority over reviewed facts, Action Plans, routing, workflow state, or execution.
+
+AI summaries are administrative summaries. They describe the document, its source/context, and explicit administrative purpose or requested action. They do not provide domain-expert interpretation of substantive document contents. The same extraction response requests one to three short plain-text paragraphs, and normalized blank-line boundaries survive persistence and Decision Packet rendering without an additional AI call.
+
+The task-lifecycle amendment introduces immutable `generic_document_review` workflow version 3 and migration `20260817_0012`. Action execution success and business-work completion are separate facts: approval creates and hands off one open InternalTask, then leaves the WorkItem in `awaiting_task_completion`; a human task-completion operation records `completed_by`, `completed_at`, and an optional note and atomically completes the WorkItem. The browser now exposes Queue + Responsible Role handoff, open/completed Tasks, source access, and completion audit history. Named-person assignment is intentionally future work. Legacy version-2 transition history remains unchanged, while its open tasks can be completed compatibly.
 
 Last feature merge:
 
@@ -227,7 +237,7 @@ Represents the persisted human-review task and audit result for an exact WorkIte
 - PostgreSQL health endpoint
 - GitHub Actions CI
 - pytest test suite
-- Alembic migration chain through `20260815_0009`
+- Alembic migration chain through `20260817_0012`
 
 The local development stack has been run successfully on Ubuntu Linux.
 

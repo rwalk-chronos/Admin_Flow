@@ -13,11 +13,17 @@ from app.document_structured_extractions import get_document_structured_extracto
 from app.document_structured_extractor import StructuredExtractionResult
 from app.main import app
 from app.models import (
+    ActionExecution,
+    ActionPlan,
     DocumentClassification,
     DocumentExtraction,
     DocumentStructuredExtraction,
     IntakeArtifact,
     IntakeEvent,
+    InternalTask,
+    WorkItem,
+    WorkItemReview,
+    WorkItemTransition,
 )
 
 pytestmark = pytest.mark.integration
@@ -35,7 +41,8 @@ class IntegrationExtractor:
             "rationale": "Contains steps.",
         }
         return StructuredExtractionResult(
-            data={"title": "Procedure", "steps": ["First", "Second"]}
+            data={"title": "Procedure", "steps": ["First", "Second"]},
+            summary="A two-step administrative procedure.",
         )
 
 
@@ -56,6 +63,8 @@ def clean_structured_extraction_data() -> Generator[None, None, None]:
 
 def _clean_database() -> None:
     with Session(get_engine()) as session:
+        session.execute(delete(InternalTask)); session.execute(delete(ActionExecution)); session.execute(delete(ActionPlan))
+        session.execute(delete(WorkItemReview)); session.execute(delete(WorkItemTransition)); session.execute(delete(WorkItem))
         session.execute(delete(DocumentStructuredExtraction))
         session.execute(delete(DocumentClassification))
         session.execute(delete(DocumentExtraction))
@@ -67,7 +76,8 @@ def _clean_database() -> None:
 def test_document_structured_extraction_migration_schema() -> None:
     inspector = inspect(get_engine())
     table = "document_structured_extractions"
-    columns = {column["name"] for column in inspector.get_columns(table)}
+    column_details = {column["name"]: column for column in inspector.get_columns(table)}
+    columns = set(column_details)
     foreign_keys = inspector.get_foreign_keys(table)
     indexes = inspector.get_indexes(table)
     assert columns == {
@@ -76,6 +86,7 @@ def test_document_structured_extraction_migration_schema() -> None:
         "document_classification_id",
         "field_schema",
         "extracted_data",
+        "summary",
         "provider_name",
         "model_name",
         "prompt_version",
@@ -95,6 +106,7 @@ def test_document_structured_extraction_migration_schema() -> None:
     assert any(
         index["column_names"] == ["document_classification_id"] for index in indexes
     )
+    assert column_details["summary"]["nullable"] is True
 
 
 def test_structured_extraction_jsonb_and_lineage_round_trip(
@@ -177,4 +189,5 @@ def test_structured_extraction_jsonb_and_lineage_round_trip(
             "title": "Procedure",
             "steps": ["First", "Second"],
         }
+        assert persisted.summary == "A two-step administrative procedure."
         assert persisted.created_at.tzinfo is not None

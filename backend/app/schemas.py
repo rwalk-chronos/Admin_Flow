@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import DocumentExtractionStatus, IntakeEventStatus
 
@@ -159,6 +159,7 @@ class DocumentStructuredExtractionResponse(BaseModel):
     document_classification_id: uuid.UUID | None
     field_schema: list[StructuredFieldDefinition]
     extracted_data: dict[str, Any]
+    summary: str | None
     provider_name: str
     model_name: str
     prompt_version: str
@@ -179,7 +180,7 @@ class WorkflowTransitionDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     from_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
     to_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
-    review_decision: Literal["approve", "reject"] | None = Field(default=None, exclude_if=lambda value: value is None)
+    review_decision: Literal["approve", "reject", "handle_manually"] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class WorkflowDefinitionCreate(BaseModel):
@@ -270,12 +271,13 @@ ReviewDecision = Literal["approve", "reject"]
 class WorkItemReviewResolve(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision: ReviewDecision
+    decision: Literal["approve", "reject", "handle_manually"]
     expected_work_item_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
     expected_work_item_version: int = Field(ge=1)
     reviewer: str = Field(min_length=1, max_length=255)
     notes: str | None = Field(default=None, max_length=2000)
     reviewed_data: dict[str, Any] | None = None
+    action_plan_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def reviewer_must_not_be_blank(self) -> "WorkItemReviewResolve":
@@ -300,6 +302,157 @@ class WorkItemReviewResponse(BaseModel):
     current_state: str
     current_version: int
     work_item_data: dict[str, Any]
+    authorized_action_plan_id: uuid.UUID | None = None
+
+
+class ActionPlanRevise(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_work_item_state: str = Field(pattern=STATE_IDENTIFIER_PATTERN)
+    expected_work_item_version: int = Field(ge=1)
+    reviewed_data: dict[str, Any]
+
+
+class ActionPlanResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    work_item_id: uuid.UUID
+    work_item_state: str
+    work_item_version: int
+    workflow_definition_id: uuid.UUID
+    workflow_definition_version: int
+    intake_event_id: uuid.UUID
+    revision: int
+    action_type: Literal["create_internal_task"]
+    facts_snapshot: dict[str, Any]
+    destination: dict[str, Any]
+    payload: dict[str, Any]
+    source_artifact_ids: list[str]
+    action_title: str
+    action_description: str
+    approval_label: str
+    external_effect: str
+    superseded_at: datetime | None
+    superseded_reason: str | None
+    created_at: datetime
+
+
+class ActionExecutionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    action_plan_id: uuid.UUID
+    idempotency_key: str
+    status: Literal["succeeded", "failed"]
+    result: dict[str, Any]
+    error_message: str | None
+    attempted_at: datetime
+    completed_at: datetime
+
+
+class InternalTaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    action_execution_id: uuid.UUID
+    work_item_id: uuid.UUID
+    title: str
+    queue: str
+    owner_role: str | None
+    due_at: datetime | None
+    facts_snapshot: dict[str, Any]
+    source_artifact_ids: list[str]
+    status: Literal["open", "completed"]
+    created_at: datetime
+    completed_at: datetime | None
+    completed_by: str | None
+    completion_note: str | None
+
+
+class InternalTaskComplete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    completed_by: str = Field(min_length=1, max_length=255)
+    completion_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("completed_by")
+    @classmethod
+    def validate_completed_by(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("completed_by must not be blank")
+        return value
+
+    @field_validator("completion_note")
+    @classmethod
+    def validate_completion_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class DecisionPacketFact(BaseModel):
+    key: str
+    label: str
+    value: Any | None
+    display_value: str
+    missing: bool
+
+
+class DecisionPacketAttention(BaseModel):
+    title: str
+    guidance: str
+    blocking: bool = False
+
+
+class DecisionPacketArtifact(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    original_filename: str | None
+    content_type: str | None
+    byte_size: int
+
+
+class DecisionPacketReview(BaseModel):
+    id: uuid.UUID
+    status: ReviewStatus
+    reviewer: str | None
+    notes: str | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+
+class DecisionPacketActionResult(BaseModel):
+    status: Literal["succeeded", "failed"]
+    completed_at: datetime
+    message: str
+    task_id: uuid.UUID | None = None
+    task_title: str | None = None
+    queue: str | None = None
+    owner_role: str | None = None
+    task_created_at: datetime | None = None
+    task_status: Literal["open", "completed"] | None = None
+    task_completed_at: datetime | None = None
+    task_completed_by: str | None = None
+    task_completion_note: str | None = None
+
+
+class DecisionPacketResponse(BaseModel):
+    review: DecisionPacketReview | None
+    work_item_id: uuid.UUID
+    title: str
+    status_label: str
+    document_type: str
+    confidence: float | None
+    confidence_band: Literal["High confidence", "Moderate confidence", "Low confidence"] | None
+    summary: str
+    summary_source: Literal["ai", "deterministic_fallback"]
+    key_information: list[DecisionPacketFact]
+    attention_items: list[DecisionPacketAttention]
+    artifacts: list[DecisionPacketArtifact]
+    action_plan: ActionPlanResponse | None
+    action_result: DecisionPacketActionResult | None
+    correction_schema: list[StructuredFieldDefinition]
+    correction_data: dict[str, Any]
+    technical: dict[str, Any]
 
 class DocumentProcessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -327,3 +480,4 @@ class DocumentProcessResponse(BaseModel):
     structured_extraction: DocumentStructuredExtractionResponse
     work_item: WorkItemResponse
     review_id: uuid.UUID
+    action_plan_id: uuid.UUID | None = None
