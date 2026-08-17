@@ -142,7 +142,7 @@ def test_decision_packet_projects_human_type_summary_facts_attention_and_source(
 
 def test_decision_packet_uses_persisted_ai_summary_without_provider_read_call(client, engine):
     result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
-    expected = "Invoice from Example Office Supply for office materials, due September 15, 2026."
+    expected = "Invoice from Example Office Supply for office materials.\n\nPayment is due September 15, 2026."
     with Session(engine) as session:
         structured = session.get(DocumentStructuredExtraction, uuid.UUID(result["structured_extraction"]["id"]))
         structured.summary = expected

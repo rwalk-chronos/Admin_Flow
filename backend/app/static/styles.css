@@ -107,6 +107,7 @@ input:disabled, select:disabled, textarea:disabled { color: #788590; background:
 .packet-section > h2 { margin: 0 0 12px; color: var(--navy-deep); font-size: .78rem; letter-spacing: .09em; text-transform: uppercase; }
 .packet-section h3 { margin: 0 0 7px; font-size: 1.08rem; }
 .packet-summary { margin: 0; font-size: 1.04rem; line-height: 1.65; }
+.packet-summary + .packet-summary { margin-top: 10px; }
 .summary-source { margin: 7px 0 0; color: var(--muted); font-size: .78rem; }
 .fact-list { display: grid; margin: 0; }
 .fact-row { display: grid; grid-template-columns: minmax(130px, .75fr) minmax(0, 1.25fr); gap: 18px; padding: 11px 0; border-bottom: 1px solid #edf1f3; }

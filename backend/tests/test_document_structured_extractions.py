@@ -217,18 +217,19 @@ def test_success_persists_exact_schema_metadata_and_extraction_lineage(
 
 
 def test_summary_is_separate_from_facts_and_persists_immutably(client, engine, extractor):
-    extractor.summary = "  A concise administrative summary.  "
+    extractor.summary = "  A concise administrative summary.\r\n\r\n  A requested response is due Friday.  "
     extraction_id = create_extraction(engine)
     response = client.post(
         f"/document-extractions/{extraction_id}/structured-extractions",
         json={"fields": fields()},
     )
     assert response.status_code == 201
-    assert response.json()["summary"] == "A concise administrative summary."
+    expected = "A concise administrative summary.\n\nA requested response is due Friday."
+    assert response.json()["summary"] == expected
     assert "summary" not in response.json()["extracted_data"]
     with Session(engine) as session:
         persisted = session.get(DocumentStructuredExtraction, uuid.UUID(response.json()["id"]))
-        assert persisted.summary == "A concise administrative summary."
+        assert persisted.summary == expected
         assert persisted.extracted_data == extractor.data
 
 
@@ -588,7 +589,7 @@ def test_openai_adapter_uses_dynamic_structured_output_and_untrusted_context():
     adapter = OpenAIDocumentStructuredExtractor(
         api_key="unused", model="gpt-5-mini", client=fake
     )
-    assert adapter.prompt_version == "document-structured-extraction-v2"
+    assert adapter.prompt_version == "document-structured-extraction-v3"
     definitions = [
         StructuredFieldDefinition(
             name="title", description="Title", type="string", required=True
@@ -609,7 +610,18 @@ def test_openai_adapter_uses_dynamic_structured_output_and_untrusted_context():
     assert call["text_format"].model_config["extra"] == "forbid"
     assert call["text_format"].model_fields["data"].annotation.model_config["extra"] == "forbid"
     assert "untrusted data" in call["input"][0]["content"]
-    assert "1–3 sentence" in call["input"][0]["content"]
+    prompt = call["input"][0]["content"]
+    assert "1–3 short paragraphs" in prompt
+    assert "blank line between paragraphs" in prompt
+    assert "administrative purpose or explicitly requested action" in prompt
+    assert "domain-expert conclusions" in prompt
+    assert "measurements, results" in prompt
+    assert "contractual terms" in prompt
+    assert "technical findings" in prompt
+    assert "do not analyze what its contents mean" in prompt
+    assert "requested field" in prompt
+    assert "generic description is not a literal document title" in prompt
+    assert "hidden reasoning" in prompt
     assert "workflow or action decisions" in call["input"][0]["content"]
     payload = json.loads(call["input"][1]["content"])
     assert payload == {

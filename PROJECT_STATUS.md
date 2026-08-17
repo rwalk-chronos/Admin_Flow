@@ -12,6 +12,8 @@ The PR #13 correction pass adds a computed Decision Packet API and replaces the 
 
 The follow-up summary correction extends the existing OpenAI structured extraction response to return strict facts plus a concise grounded administrative summary in the same request. Migration `20260816_0011` persists the optional immutable summary on `DocumentStructuredExtraction`; legacy and local-stub rows remain `NULL` and use an explicitly labeled deterministic fallback. Summary prose is explanatory only and has no authority over reviewed facts, Action Plans, routing, workflow state, or execution.
 
+AI summaries are administrative summaries. They describe the document, its source/context, and explicit administrative purpose or requested action. They do not provide domain-expert interpretation of substantive document contents. The same extraction response requests one to three short plain-text paragraphs, and normalized blank-line boundaries survive persistence and Decision Packet rendering without an additional AI call.
+
 Last feature merge:
 
 - PR #11 — `Add local manual intake experience` — merged to `main`

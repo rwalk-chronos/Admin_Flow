@@ -261,6 +261,8 @@ curl -X POST \
 
 The immutable `DocumentStructuredExtraction` stores source lineage, the exact requested field-definition snapshot, validated extracted data, an optional explanatory document summary, and provider/model/prompt metadata. In OpenAI mode, the existing structured extraction request returns both the strict application-defined facts and a concise grounded summary in one structured response—there is no additional summarization request. Application code validates the exact field set, required/null behavior, scalar types, real ISO calendar dates, string-array elements, and summary bounds after every provider response. The summary remains separate from `extracted_data`, is explanatory only, and never controls a WorkItem, Action Plan, transition, or execution.
 
+AI summaries are administrative summaries. They describe the document, its source/context, and explicit administrative purpose or requested action. They do not provide domain-expert interpretation of substantive document contents. The provider is asked for one to three short paragraphs separated by blank lines; AdminFlow normalizes and persists those paragraph boundaries as plain text and renders them as readable paragraphs. One-paragraph and legacy summaries remain valid.
+
 ## WorkItems and deterministic workflows
 
 A `WorkflowDefinition` is an immutable, application-defined graph of states and allowed transitions. Definitions are validated before persistence: state identifiers are constrained, terminal and reachability rules are checked, and cycles are accepted only when every nonterminal state still has a path to a terminal state.

@@ -119,6 +119,9 @@ def test_review_ui_explains_and_authorizes_exact_action_plan() -> None:
     assert "Technical details" in source
     assert "AI-generated summary" in source
     assert "Basic summary" in source
+    assert "function summaryParagraphs(summary)" in source
+    assert '.split(/\\n\\s*\\n/)' in source
+    assert '...summaryParagraphs(packet.summary)' in source
 
 
 def test_review_defaults_to_decision_packet_not_technical_editor() -> None:
