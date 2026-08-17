@@ -323,7 +323,9 @@ The application-owned `generic_office` processing profile creates an immutable, 
 
 `GET /work-item-reviews/{id}/decision-packet` provides the human-facing review projection without adding another persisted record or AI request. It follows immutable classification and extraction lineage server-side and returns a plain-language document type and confidence band, persisted AI summary when available, readable key information, attention items, original artifacts, current Action Plan presentation, and the correction contract. Local-stub and historical records with no persisted summary use an explicitly identified deterministic fallback and are never presented as AI-generated. The browser defaults to this read-first Decision Packet; correction inputs appear only after **Correct Information**, and **Review Changes** revises the immutable Action Plan before authorization is offered again. Reviewed facts remain authoritative for deterministic actions; correcting facts does not rewrite the immutable source summary.
 
-If reviewed facts change, `POST /work-item-reviews/{id}/action-plan` validates them and creates a new immutable revision; the previous plan is retained as superseded. Approval creates one `ActionExecution` and one `InternalTask` transactionally using the Action Plan as the idempotency identity. Approval, execution success, and workflow transitions remain separate audit facts. **Handle Manually** preserves the source and review context without executing the plan.
+If reviewed facts change, `POST /work-item-reviews/{id}/action-plan` validates them and creates a new immutable revision; the previous plan is retained as superseded. Approval creates one `ActionExecution` and one open `InternalTask` transactionally using the Action Plan as the idempotency identity. New generic documents use immutable workflow version 3: successful task creation moves the WorkItem to `awaiting_task_completion`, and `POST /internal-tasks/{id}/complete` records the completing human, time, and optional note while atomically moving the WorkItem to `completed`. Action execution success and business-work completion are separate facts. Legacy version-2 WorkItems retain their historical transitions; an open legacy task linked to an already-completed WorkItem can receive completion metadata without another WorkItem transition. **Handle Manually** preserves the source and review context without executing the plan.
+
+The deterministic V1 handoff is Queue + Responsible Role. Approval places the task in that queue for the stated organizational role; it does not imply a named-person assignment. Named assignees, authentication, staffing rules, and role administration remain future work. Open tasks are listed with due tasks first and then oldest-created first; omitting the status filter preserves the existing newest-created-first list behavior.
 
 Action history is available through the WorkItem detail screen and these APIs:
 
@@ -333,6 +335,7 @@ GET /action-plans/{id}
 GET /action-plans/{id}/executions
 GET /internal-tasks
 GET /internal-tasks/{id}
+POST /internal-tasks/{id}/complete
 GET /work-item-reviews/{id}/decision-packet
 GET /work-items/{id}/decision-packet
 ```
@@ -348,6 +351,7 @@ The dashboard provides:
 - an overview of pending reviews, open and terminal WorkItems, and recent intake
 - an oldest-first human review queue with approved and rejected history filters
 - split-screen source-document preview and read-first Decision Packet with optional correction mode
+- open/completed task queues, cognitive task detail, original-document access, and human task completion
 - read-only WorkItem state, lineage, transition, and review history
 - recent IntakeEvents and immutable artifact viewing
 

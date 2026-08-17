@@ -3,7 +3,8 @@
 const content = document.querySelector("#main-content");
 const toast = document.querySelector("#toast");
 const navReviewCount = document.querySelector("#nav-review-count");
-const state = { objectUrl: null, reviewStatus: "pending", dashboardDirty: true };
+const navTaskCount = document.querySelector("#nav-task-count");
+const state = { objectUrl: null, reviewStatus: "pending", taskStatus: "open", dashboardDirty: true };
 
 function element(tag, options = {}, children = []) {
   const node = document.createElement(tag);
@@ -149,16 +150,26 @@ async function updateReviewCount() {
   }
 }
 
+async function updateTaskCount() {
+  try {
+    const tasks = await api("/internal-tasks?status=open");
+    navTaskCount.textContent = tasks.length ? String(tasks.length) : "";
+  } catch (_) {
+    navTaskCount.textContent = "";
+  }
+}
+
 async function dashboard() {
   setActiveNav("dashboard");
   clear();
   content.append(pageHeader("Overview", "Dashboard", "A current view of intake, work, and decisions in this local AdminFlow system."));
   const loading = element("div", { className: "card loading-state", text: "Loading dashboard…" });
   content.append(loading);
-  const [reviews, workItems, intakeEvents, workflows] = await Promise.all([
-    api("/work-item-reviews?status=pending"), api("/work-items"), api("/intake-events"), api("/workflow-definitions"),
+  const [reviews, tasks, workItems, intakeEvents, workflows] = await Promise.all([
+    api("/work-item-reviews?status=pending"), api("/internal-tasks?status=open"), api("/work-items"), api("/intake-events"), api("/workflow-definitions"),
   ]);
   navReviewCount.textContent = reviews.length ? String(reviews.length) : "";
+  navTaskCount.textContent = tasks.length ? String(tasks.length) : "";
   const terminalByWorkflow = new Map(workflows.map((workflow) => [workflow.id, new Set(workflow.states.filter((item) => item.terminal).map((item) => item.name))]));
   const terminalCount = workItems.filter((item) => terminalByWorkflow.get(item.workflow_definition_id)?.has(item.current_state)).length;
   clear();
@@ -167,7 +178,7 @@ async function dashboard() {
     element("section", { className: "summary-grid", attrs: { "aria-label": "System summary" } }, [
       summaryCard("Pending Reviews", reviews.length),
       summaryCard("Open Work Items", workItems.length - terminalCount),
-      summaryCard("Recent Intake", intakeEvents.length),
+      summaryCard("Open Tasks", tasks.length),
       summaryCard("Terminal Work Items", terminalCount),
     ]),
   );
@@ -349,8 +360,8 @@ async function reviewDetail(reviewId) {
     try {
       await api(`/work-item-reviews/${review.id}/resolve`, { method: "POST", body: JSON.stringify({ decision, expected_work_item_state: packet.technical.state, expected_work_item_version: packet.technical.version, reviewer: reviewer.value.trim(), notes: notes.value.trim() || null, ...(decision === "approve" ? { reviewed_data: packet.correction_data, action_plan_id: packet.action_plan?.id || null } : {}) }) });
       cleanupDocumentUrl(); state.dashboardDirty = true;
-      showToast(decision === "approve" ? "Approved and action completed." : "Moved to manual handling.");
-      await updateReviewCount(); window.location.hash = `work-item/${packet.work_item_id}`;
+      showToast(decision === "approve" ? "Approved. The task was created and handed off." : "Moved to manual handling.");
+      await Promise.all([updateReviewCount(), updateTaskCount()]); window.location.hash = `work-item/${packet.work_item_id}`;
     } catch (error) {
       if (error.status === 409) { showToast("This item changed while you were reviewing it. Reloading the latest version.", "error"); await reviewDetail(reviewId); }
       else showToast(error.message, "error");
@@ -362,10 +373,10 @@ async function reviewDetail(reviewId) {
     const identity = element("header", { className: "packet-identity" }, [element("div", { className: "document-meta", text: `${packet.document_type}${packet.confidence_band ? ` · ${packet.confidence_band}` : ""}${packet.confidence !== null ? ` · ${Math.round(packet.confidence * 100)}%` : ""}` }), element("p", { className: "status-line", text: packet.status_label })]);
     if (updated) identity.append(element("div", { className: "notice", text: "Information updated. Review the revised action before approving." }));
     const attention = packet.attention_items.length
-      ? element("ul", { className: "attention-list" }, packet.attention_items.map((item) => element("li", {}, [element("strong", { text: `⚠ ${item.title}` }), element("p", { text: item.guidance })])))
-      : element("p", { className: "all-clear", text: "✓ Nothing needs your attention." });
+      ? section("Needs your attention", [element("ul", { className: "attention-list" }, packet.attention_items.map((item) => element("li", {}, [element("strong", { text: `⚠ ${item.title}` }), element("p", { text: item.guidance })])))], "packet-section attention-section")
+      : null;
     const plan = packet.action_plan
-      ? [element("h3", { text: packet.action_plan.action_title }), element("p", { text: packet.action_plan.action_description }), element("p", { className: "external-effect", text: packet.action_plan.external_effect })]
+      ? [element("h3", { text: `Create task: ${packet.action_plan.payload.task.title}` }), element("dl", { className: "detail-grid handoff-details" }, [detailItem("Send to", titleCase(packet.action_plan.destination.queue)), detailItem("Responsible role", titleCase(packet.action_plan.destination.role)), detailItem("Assigned to", "Unassigned — available to the responsible queue")]), element("p", { text: packet.action_plan.action_description }), element("p", { text: "Approval performs this internal handoff automatically." }), element("p", { className: "external-effect", text: packet.action_plan.external_effect })]
       : [element("p", { text: "No automated next action is available. Choose manual handling." })];
     const decisionChildren = [];
     if (review.status === "pending") {
@@ -374,7 +385,7 @@ async function reviewDetail(reviewId) {
       decisionChildren.push(element("p", { text: `${titleCase(review.status)}${review.reviewer ? ` by ${review.reviewer}` : ""}${review.resolved_at ? ` on ${formatDate(review.resolved_at)}` : ""}.` }));
     }
     const summarySource = packet.summary_source === "ai" ? "AI-generated summary" : "Basic summary";
-    packetHost.append(identity, section("Summary", [...summaryParagraphs(packet.summary), element("p", { className: "summary-source", text: summarySource })]), section("Key information", [factList()]), section("Needs your attention", [attention], "packet-section attention-section"), section("Original document", [originalLink()]), section("What will happen next", plan, "packet-section action-plan-card"), section("Your decision", decisionChildren, "packet-section decision-section"));
+    packetHost.append(identity, section("Summary", [...summaryParagraphs(packet.summary), element("p", { className: "summary-source", text: summarySource })]), section("Key information", [factList()]), ...(attention ? [attention] : []), section("Original document", [originalLink()]), section("What will happen next", plan, "packet-section action-plan-card"), section("Your decision", decisionChildren, "packet-section decision-section"));
     packetHost.querySelector('[data-action="correct-information"]')?.addEventListener("click", drawCorrectionMode);
     packetHost.querySelector('[data-action="manual"]')?.addEventListener("click", () => resolve(packet.action_plan ? "handle_manually" : "reject"));
     packetHost.querySelector('[data-action="approve"]')?.addEventListener("click", () => resolve("approve"));
@@ -408,6 +419,67 @@ async function reviewDetail(reviewId) {
 
 function detailItem(label, value) {
   return element("div", { className: "detail-item" }, [element("dt", { text: label }), element("dd", { text: value ?? "—" })]);
+}
+
+async function tasks(taskStatus = state.taskStatus) {
+  state.taskStatus = taskStatus;
+  setActiveNav("tasks");
+  clear();
+  content.append(pageHeader("Internal work", "Tasks", "Work handed off to AdminFlow queues and responsible roles."));
+  const tabs = element("div", { className: "tabs", attrs: { role: "tablist", "aria-label": "Task status" } });
+  for (const value of ["open", "completed"]) {
+    const button = element("button", { className: `tab${taskStatus === value ? " active" : ""}`, text: titleCase(value), type: "button", attrs: { role: "tab", "aria-selected": taskStatus === value } });
+    button.addEventListener("click", () => tasks(value).catch(renderError));
+    tabs.append(button);
+  }
+  const host = element("div", { className: "task-list" }, [element("div", { className: "loading-state", text: "Loading tasks…" })]);
+  content.append(tabs, host);
+  const rows = await api(`/internal-tasks?status=${encodeURIComponent(taskStatus)}`);
+  clear(host);
+  for (const task of rows) {
+    host.append(element("article", { className: "card task-card" }, [
+      element("div", {}, [element("h2", { text: task.title }), element("div", { className: "row-meta" }, [element("span", { text: titleCase(task.queue) }), element("span", { text: `Responsible role: ${titleCase(task.owner_role) || "Not specified"}` }), task.due_at ? element("span", { text: `Due: ${formatDate(task.due_at)}` }) : null, element("span", { text: `Created: ${formatDate(task.created_at)}` })]), badge(task.status)]),
+      element("a", { className: "button", text: "Open Task", href: `#task/${task.id}` }),
+    ]));
+  }
+  if (!rows.length) host.append(emptyState(`No ${taskStatus} tasks.`));
+  if (taskStatus === "open") navTaskCount.textContent = rows.length ? String(rows.length) : "";
+}
+
+async function taskDetail(taskId) {
+  setActiveNav("tasks");
+  clear();
+  content.append(element("div", { className: "loading-state", text: "Loading task…" }));
+  let task = await api(`/internal-tasks/${taskId}`);
+  const render = () => {
+    clear();
+    content.append(pageHeader("Internal task", task.title, "The queue handoff, source material, and completion record.", element("a", { className: "button secondary", text: "Back to tasks", href: "#tasks" })));
+    const overview = element("section", { className: "card packet-section task-overview" }, [element("div", { className: "eyebrow", text: "Status" }), element("h2", { text: titleCase(task.status) }), element("dl", { className: "detail-grid" }, [detailItem("Queue", titleCase(task.queue)), detailItem("Responsible role", titleCase(task.owner_role) || "Not specified"), detailItem("Assigned to", "Unassigned — available to the responsible queue"), detailItem("Due", task.due_at ? formatDate(task.due_at) : "No due date"), detailItem("Created", formatDate(task.created_at))])]);
+    const facts = element("section", { className: "card packet-section" }, [element("h2", { text: "What this task is for" }), element("dl", { className: "fact-list" }, Object.entries(task.facts_snapshot).map(([key, value]) => detailItem(titleCase(key), value === null || value === "" ? "Not identified" : Array.isArray(value) ? value.join(", ") : String(value))))]);
+    const links = element("section", { className: "card packet-section" }, [element("h2", { text: "Source" }), element("div", { className: "action-row source-actions" }, [task.source_artifact_ids[0] ? element("a", { className: "button secondary", text: "View Original Document", href: `/intake-artifacts/${task.source_artifact_ids[0]}/content`, attrs: { target: "_blank", rel: "noopener" } }) : null, element("a", { className: "button secondary", text: "View Source Work Item", href: `#work-item/${task.work_item_id}` })])]);
+    const completion = element("section", { className: "card packet-section completion-card" }, [element("h2", { text: task.status === "open" ? "Complete task" : "Task completed" })]);
+    if (task.status === "completed") {
+      completion.append(element("dl", { className: "detail-grid" }, [detailItem("Completed by", task.completed_by), detailItem("Completed", formatDate(task.completed_at)), detailItem("Note", task.completion_note || "No completion note") ]));
+    } else {
+      const completedBy = element("input", { id: "completed-by", value: getSavedReviewer(), attrs: { required: "", maxlength: "255", autocomplete: "name" } });
+      const completionNote = element("textarea", { id: "completion-note", attrs: { maxlength: "2000", rows: "4" } });
+      const completeButton = element("button", { className: "button", text: "Mark Task Complete", type: "button" });
+      completion.append(element("div", { className: "decision-fields" }, [element("div", { className: "field" }, [element("label", { text: "Your name", attrs: { for: "completed-by" } }), completedBy]), element("div", { className: "field" }, [element("label", { text: "Completion note (optional)", attrs: { for: "completion-note" } }), completionNote])]), element("div", { className: "action-row" }, [completeButton]));
+      completeButton.addEventListener("click", async () => {
+        if (!completedBy.value.trim()) { completedBy.focus(); showToast("Your name is required.", "error"); return; }
+        try {
+          task = await api(`/internal-tasks/${task.id}/complete`, { method: "POST", body: JSON.stringify({ completed_by: completedBy.value.trim(), completion_note: completionNote.value.trim() || null }) });
+          saveReviewer(completedBy.value.trim());
+          await updateTaskCount();
+          showToast("Task completed. The source WorkItem is now complete.");
+          render();
+        } catch (error) { showToast(error.message, "error"); }
+      });
+    }
+    const technical = element("details", { className: "card technical-details" }, [element("summary", { text: "Technical details" }), element("div", { className: "card-body" }, [element("pre", { className: "data-view", text: JSON.stringify({ id: task.id, action_execution_id: task.action_execution_id, work_item_id: task.work_item_id }, null, 2) })])]);
+    content.append(element("div", { className: "section-stack cognitive-task" }, [overview, facts, links, completion, technical]));
+  };
+  render();
 }
 
 async function workItems() {
@@ -452,12 +524,13 @@ async function workItemDetail(id) {
     const sourceCard = element("section", { className: "card packet-section" }, [element("h2", { text: "What came in" }), ...summaryParagraphs(packet.summary), element("p", { className: "summary-source", text: packet.summary_source === "ai" ? "AI-generated summary" : "Basic summary" }), artifacts.length ? element("a", { className: "button secondary", text: "View Original Document", href: `/intake-artifacts/${artifacts[0].id}/content`, attrs: { target: "_blank", rel: "noopener" } }) : element("p", { text: "No original document is available." })]);
     const facts = element("section", { className: "card packet-section" }, [element("h2", { text: "Key information" }), element("dl", { className: "fact-list" }, packet.key_information.map((fact) => element("div", { className: "fact-row" }, [element("dt", { text: fact.label }), element("dd", { text: fact.display_value })]))) ]);
     const result = packet.action_result;
-    const happened = element("section", { className: "card packet-section action-result" }, [element("h2", { text: "What happened" }), result ? element("div", {}, [element("h3", { text: result.message }), result.task_title ? element("p", { text: result.task_title }) : null, element("dl", { className: "detail-grid" }, [detailItem("Queue", result.queue), detailItem("Owner", result.owner_role), detailItem("Created", formatDate(result.task_created_at))])]) : element("p", { text: packet.status_label === "Manual handling" ? "The proposed Action Plan was not executed. This item was preserved for manual handling." : "No action result has been recorded." })]);
+    const happened = element("section", { className: "card packet-section action-result" }, [element("h2", { text: "What happened" }), result ? element("div", {}, [element("h3", { text: result.message }), element("p", { text: result.task_status === "open" ? "The document was approved and handed off. The follow-up task still needs to be completed." : "The follow-up task has been completed." }), element("dl", { className: "detail-grid" }, [detailItem("Task", result.task_title), detailItem("Queue", result.queue), detailItem("Responsible role", result.owner_role), detailItem("Task status", titleCase(result.task_status)), detailItem("Task created", formatDate(result.task_created_at))]), result.task_id ? element("a", { className: "button secondary", text: "View Task", href: `#task/${result.task_id}` }) : null]) : element("p", { text: packet.status_label === "Handled manually" ? "The proposed Action Plan was not executed. This item was preserved for manual handling." : "No action result has been recorded." })]);
     const reviewEntry = packet.review;
-    const reviewCard = element("section", { className: "card packet-section" }, [element("h2", { text: "Review" }), reviewEntry ? element("p", { text: `${titleCase(reviewEntry.status)}${reviewEntry.reviewer ? ` by ${reviewEntry.reviewer}` : ""}${reviewEntry.resolved_at ? ` on ${formatDate(reviewEntry.resolved_at)}` : ""}.` }) : element("p", { text: "No review record is available." }), reviewEntry?.notes ? element("p", { text: reviewEntry.notes }) : null]);
+    const reviewCard = element("section", { className: "card packet-section" }, [element("h2", { text: "Document review" }), reviewEntry ? element("p", { text: `${titleCase(reviewEntry.status)}${reviewEntry.reviewer ? ` by ${reviewEntry.reviewer}` : ""}${reviewEntry.resolved_at ? ` on ${formatDate(reviewEntry.resolved_at)}` : ""}.` }) : element("p", { text: "No review record is available." }), reviewEntry?.notes ? element("p", { text: reviewEntry.notes }) : null]);
+    const taskCompletion = result?.task_status === "completed" ? element("section", { className: "card packet-section" }, [element("h2", { text: "Task completion" }), element("dl", { className: "detail-grid" }, [detailItem("Completed by", result.task_completed_by), detailItem("Completed", formatDate(result.task_completed_at)), detailItem("Note", result.task_completion_note || "No completion note")])]) : null;
     const actionCard = historyCard("Action history", plans.map((plan) => { const execution = executions.find((value) => value.action_plan_id === plan.id); return { title: plan.action_title, meta: execution ? `${titleCase(execution.status)} · ${formatDate(execution.completed_at)}` : plan.superseded_at ? "Superseded after corrected information" : "Not executed" }; }));
     const technical = element("details", { className: "card technical-details" }, [element("summary", { text: "Technical details" }), element("div", { className: "card-body" }, [element("pre", { className: "data-view", text: JSON.stringify({ ...packet.technical, data: item.data, transitions }, null, 2) })])]);
-    content.append(element("div", { className: "section-stack cognitive-work-item" }, [statusCard, sourceCard, facts, happened, reviewCard, actionCard, technical]));
+    content.append(element("div", { className: "section-stack cognitive-work-item" }, [statusCard, sourceCard, facts, happened, reviewCard, taskCompletion, actionCard, technical]));
     return;
   }
   content.append(pageHeader("Work item", item.title, "Read-only workflow state, source lineage, and audit history.", element("a", { className: "button secondary", text: "Back to work items", href: "#work-items" })));
@@ -514,6 +587,8 @@ async function route() {
     if (name === "new-intake") await window.ManualIntake.render();
     else if (name === "reviews") await reviewQueue();
     else if (name === "review" && id) await reviewDetail(id);
+    else if (name === "tasks") await tasks();
+    else if (name === "task" && id) await taskDetail(id);
     else if (name === "work-items") await workItems();
     else if (name === "work-item" && id) await workItemDetail(id);
     else if (name === "intake" && id) await intakeDetail(id);
@@ -527,4 +602,6 @@ async function route() {
 
 window.addEventListener("hashchange", route);
 window.addEventListener("beforeunload", cleanupDocumentUrl);
+updateReviewCount();
+updateTaskCount();
 route();

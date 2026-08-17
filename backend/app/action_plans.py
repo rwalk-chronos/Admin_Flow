@@ -1,15 +1,16 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from app.db import get_session
 from app.document_structured_extractor import StructuredExtractionProviderError, validate_extracted_data
-from app.models import ActionExecution, ActionPlan, IntakeArtifact, InternalTask, WorkItem, WorkItemReview
-from app.schemas import ActionExecutionResponse, ActionPlanResponse, ActionPlanRevise, InternalTaskResponse, StructuredFieldDefinition
+from app.models import ActionExecution, ActionPlan, IntakeArtifact, InternalTask, WorkItem, WorkItemReview, WorkItemTransition
+from app.schemas import ActionExecutionResponse, ActionPlanResponse, ActionPlanRevise, InternalTaskComplete, InternalTaskResponse, StructuredFieldDefinition
+from app.workflow_engine import WorkflowTransitionConflict, apply_transition
 
 router = APIRouter(tags=["actions"])
 SessionDependency = Annotated[Session, Depends(get_session)]
@@ -90,12 +91,92 @@ def list_executions(plan_id: uuid.UUID, session: SessionDependency):
 
 
 @router.get("/internal-tasks", response_model=list[InternalTaskResponse])
-def list_internal_tasks(session: SessionDependency):
-    return list(session.scalars(select(InternalTask).order_by(InternalTask.created_at.desc(), InternalTask.id.desc())))
+def list_internal_tasks(
+    session: SessionDependency,
+    task_status: Literal["open", "completed"] | None = Query(default=None, alias="status"),
+):
+    statement = select(InternalTask)
+    if task_status is not None:
+        statement = statement.where(InternalTask.status == task_status)
+    if task_status == "open":
+        statement = statement.order_by(
+            case((InternalTask.due_at.is_(None), 1), else_=0),
+            InternalTask.due_at.asc(),
+            InternalTask.created_at.asc(),
+            InternalTask.id.asc(),
+        )
+    else:
+        statement = statement.order_by(InternalTask.created_at.desc(), InternalTask.id.desc())
+    return list(session.scalars(statement))
 
 
 @router.get("/internal-tasks/{task_id}", response_model=InternalTaskResponse)
 def get_internal_task(task_id: uuid.UUID, session: SessionDependency):
     task = session.get(InternalTask, task_id)
     if task is None: raise HTTPException(404, "Internal task not found")
+    return task
+
+
+@router.post("/internal-tasks/{task_id}/complete", response_model=InternalTaskResponse)
+def complete_internal_task(
+    task_id: uuid.UUID,
+    request: InternalTaskComplete,
+    session: SessionDependency,
+):
+    task = session.scalar(
+        select(InternalTask).where(InternalTask.id == task_id).with_for_update()
+    )
+    if task is None:
+        raise HTTPException(404, "Internal task not found")
+    if task.status == "completed":
+        return task
+
+    item = session.scalar(
+        select(WorkItem).where(WorkItem.id == task.work_item_id).with_for_update()
+    )
+    workflow = item.workflow_definition
+    is_v3 = workflow.name == "generic_document_review" and workflow.version == 3
+    is_legacy_completed = (
+        workflow.name == "generic_document_review"
+        and workflow.version == 2
+        and item.current_state == "completed"
+    )
+    if not is_legacy_completed and (
+        not is_v3 or item.current_state != "awaiting_task_completion"
+    ):
+        session.rollback()
+        raise HTTPException(
+            409,
+            "Internal task cannot be completed from the current WorkItem lifecycle state",
+        )
+
+    now = datetime.now(timezone.utc)
+    if is_v3:
+        try:
+            result = apply_transition(
+                item,
+                workflow,
+                expected_state="awaiting_task_completion",
+                expected_version=item.version,
+                to_state="completed",
+            )
+        except WorkflowTransitionConflict as exc:
+            session.rollback()
+            raise HTTPException(409, str(exc)) from exc
+        session.add(
+            WorkItemTransition(
+                work_item_id=item.id,
+                version=result.version,
+                from_state=result.from_state,
+                to_state=result.to_state,
+                reason="Internal task completed",
+            )
+        )
+
+    task.status = "completed"
+    task.completed_at = now
+    task.completed_by = request.completed_by
+    task.completion_note = request.completion_note
+    session.commit()
+    session.refresh(task)
     return task

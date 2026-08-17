@@ -14,6 +14,8 @@ The follow-up summary correction extends the existing OpenAI structured extracti
 
 AI summaries are administrative summaries. They describe the document, its source/context, and explicit administrative purpose or requested action. They do not provide domain-expert interpretation of substantive document contents. The same extraction response requests one to three short plain-text paragraphs, and normalized blank-line boundaries survive persistence and Decision Packet rendering without an additional AI call.
 
+The task-lifecycle amendment introduces immutable `generic_document_review` workflow version 3 and migration `20260817_0012`. Action execution success and business-work completion are separate facts: approval creates and hands off one open InternalTask, then leaves the WorkItem in `awaiting_task_completion`; a human task-completion operation records `completed_by`, `completed_at`, and an optional note and atomically completes the WorkItem. The browser now exposes Queue + Responsible Role handoff, open/completed Tasks, source access, and completion audit history. Named-person assignment is intentionally future work. Legacy version-2 transition history remains unchanged, while its open tasks can be completed compatibly.
+
 Last feature merge:
 
 - PR #11 — `Add local manual intake experience` — merged to `main`
@@ -235,7 +237,7 @@ Represents the persisted human-review task and audit result for an exact WorkIte
 - PostgreSQL health endpoint
 - GitHub Actions CI
 - pytest test suite
-- Alembic migration chain through `20260815_0009`
+- Alembic migration chain through `20260817_0012`
 
 The local development stack has been run successfully on Ubuntu Linux.
 

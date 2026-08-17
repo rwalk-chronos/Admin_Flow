@@ -88,6 +88,8 @@ def test_migration_0010_action_schema_constraints_and_lineage() -> None:
     assert {constraint["name"] for constraint in inspector.get_unique_constraints("action_plans")} >= {"uq_action_plans_item_revision"}
     assert {constraint["name"] for constraint in inspector.get_unique_constraints("action_executions")} >= {"uq_action_executions_plan", "uq_action_executions_idempotency"}
     assert {constraint["name"] for constraint in inspector.get_unique_constraints("internal_tasks")} >= {"uq_internal_tasks_execution"}
+    task_columns = {column["name"] for column in inspector.get_columns("internal_tasks")}
+    assert {"completed_at", "completed_by", "completion_note"} <= task_columns
     review_fks = inspector.get_foreign_keys("work_item_reviews")
     assert any(fk["constrained_columns"] == ["authorized_action_plan_id"] and fk["referred_table"] == "action_plans" for fk in review_fks)
 

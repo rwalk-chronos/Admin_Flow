@@ -248,7 +248,16 @@ def resolve_review(
     session.add(transition)
     if request.decision == "approve" and active_plan is not None:
         execution = execute_internal_task(session, active_plan)
-        result_state = "completed" if execution.status == "succeeded" else "action_needs_attention"
+        successful_state = (
+            "awaiting_task_completion"
+            if any(
+                edge["from_state"] == item.current_state
+                and edge["to_state"] == "awaiting_task_completion"
+                for edge in workflow.transitions
+            )
+            else "completed"
+        )
+        result_state = successful_state if execution.status == "succeeded" else "action_needs_attention"
         try:
             execution_transition = apply_transition(
                 item, workflow, expected_state=item.current_state,

@@ -100,6 +100,9 @@ def test_pipeline_persists_atomic_lineage_review_and_is_idempotent(client, engin
     assert body["work_item"]["title"] == "Invoice INV-1001"
     assert body["work_item"]["current_state"] == "needs_review"
     assert body["work_item"]["data"] == body["structured_extraction"]["extracted_data"]
+    packet = client.get(f"/work-item-reviews/{body['review_id']}/decision-packet").json()
+    assert packet["status_label"] == "Ready for review"
+    assert packet["attention_items"] == []
     second = client.post(f"/document-extractions/{extraction_id}/process", json={})
     assert second.status_code == 201
     assert second.json()["reused"] is True
@@ -111,7 +114,12 @@ def test_pipeline_persists_atomic_lineage_review_and_is_idempotent(client, engin
         assert session.scalar(select(func.count(WorkItemTransition.id))) == 1
         review = session.scalar(select(WorkItemReview))
         assert review.id == uuid.UUID(body["review_id"]) and review.status == "pending"
-        assert session.scalar(select(WorkflowDefinition)).name == "generic_document_review"
+        workflow = session.scalar(select(WorkflowDefinition))
+        assert (workflow.name, workflow.version) == ("generic_document_review", 3)
+        assert [state["name"] for state in workflow.states] == [
+            "needs_review", "approved_for_action", "awaiting_task_completion",
+            "completed", "action_needs_attention", "manual_handling",
+        ]
 
 
 def test_decision_packet_projects_human_type_summary_facts_attention_and_source(client, engine):
@@ -190,14 +198,20 @@ def test_exact_action_plan_authorization_creates_one_internal_task(client, engin
     })
     assert approved.status_code == 201, approved.text
     assert approved.json()["authorized_action_plan_id"] == plan["id"]
-    assert approved.json()["current_state"] == "completed"
-    assert len(client.get("/internal-tasks").json()) == 1
+    assert approved.json()["current_state"] == "awaiting_task_completion"
+    tasks = client.get("/internal-tasks?status=open").json()
+    assert len(tasks) == 1
+    task = tasks[0]
+    assert task["status"] == "open"
+    assert task["completed_at"] is None
     assert client.get(f"/action-plans/{plan['id']}/executions").json()[0]["status"] == "succeeded"
-    completed_packet = client.get(f"/work-items/{review['work_item_id']}/decision-packet").json()
-    assert completed_packet["status_label"] == "Completed"
-    assert completed_packet["action_result"]["message"] == "Internal task created successfully"
-    assert completed_packet["action_result"]["queue"] == "Accounts Payable"
-    assert completed_packet["review"]["reviewer"] == "office-user"
+    awaiting_packet = client.get(f"/work-items/{review['work_item_id']}/decision-packet").json()
+    assert awaiting_packet["status_label"] == "Awaiting task completion"
+    assert awaiting_packet["action_result"]["message"] == "Internal task created successfully"
+    assert awaiting_packet["action_result"]["queue"] == "Accounts Payable"
+    assert awaiting_packet["action_result"]["owner_role"] == "Office Manager"
+    assert awaiting_packet["action_result"]["task_status"] == "open"
+    assert awaiting_packet["review"]["reviewer"] == "office-user"
     duplicate = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
         "decision": "approve", "expected_work_item_state": review["state"],
         "expected_work_item_version": review["work_item_version"], "reviewer": "office-user",
@@ -207,6 +221,98 @@ def test_exact_action_plan_authorization_creates_one_internal_task(client, engin
     with Session(engine) as session:
         assert session.scalar(select(func.count(ActionExecution.id))) == 1
         assert session.scalar(select(func.count(InternalTask.id))) == 1
+
+    blank_name = client.post(
+        f"/internal-tasks/{task['id']}/complete",
+        json={"completed_by": "   ", "completion_note": "Must not persist"},
+    )
+    assert blank_name.status_code == 422
+    completed = client.post(
+        f"/internal-tasks/{task['id']}/complete",
+        json={"completed_by": "task-worker", "completion_note": "Reviewed and filed."},
+    )
+    assert completed.status_code == 200, completed.text
+    completed_task = completed.json()
+    assert completed_task["status"] == "completed"
+    assert completed_task["completed_by"] == "task-worker"
+    assert completed_task["completed_at"] is not None
+    assert completed_task["completion_note"] == "Reviewed and filed."
+    completed_packet = client.get(f"/work-items/{review['work_item_id']}/decision-packet").json()
+    assert completed_packet["status_label"] == "Completed"
+    assert completed_packet["action_result"]["task_status"] == "completed"
+    assert completed_packet["action_result"]["task_completed_by"] == "task-worker"
+    with Session(engine) as session:
+        item = session.get(WorkItem, uuid.UUID(review["work_item_id"]))
+        transition_count = session.scalar(select(func.count(WorkItemTransition.id)).where(WorkItemTransition.work_item_id == item.id))
+        snapshot = (item.version, completed_task["completed_at"], completed_task["completed_by"], completed_task["completion_note"], transition_count)
+    repeated = client.post(
+        f"/internal-tasks/{task['id']}/complete",
+        json={"completed_by": "different-person", "completion_note": "Changed"},
+    )
+    assert repeated.status_code == 200
+    assert (repeated.json()["completed_at"], repeated.json()["completed_by"], repeated.json()["completion_note"]) == snapshot[1:4]
+    with Session(engine) as session:
+        item = session.get(WorkItem, uuid.UUID(review["work_item_id"]))
+        assert item.version == snapshot[0]
+        assert session.scalar(select(func.count(WorkItemTransition.id)).where(WorkItemTransition.work_item_id == item.id)) == snapshot[4]
+
+
+def test_task_completion_rejects_inconsistent_lifecycle_without_partial_mutation(client, engine):
+    result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
+    review = client.get(f"/work-item-reviews/{result['review_id']}").json()
+    client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "approve", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "reviewer",
+        "reviewed_data": review["work_item_data"], "action_plan_id": result["action_plan_id"],
+    })
+    task = client.get("/internal-tasks?status=open").json()[0]
+    with Session(engine) as session:
+        item = session.get(WorkItem, uuid.UUID(review["work_item_id"]))
+        item.current_state = "approved_for_action"
+        session.commit()
+        version = item.version
+    response = client.post(f"/internal-tasks/{task['id']}/complete", json={"completed_by": "worker"})
+    assert response.status_code == 409
+    with Session(engine) as session:
+        persisted_task = session.get(InternalTask, uuid.UUID(task["id"]))
+        persisted_item = session.get(WorkItem, uuid.UUID(review["work_item_id"]))
+        assert (persisted_task.status, persisted_task.completed_at, persisted_task.completed_by) == ("open", None, None)
+        assert (persisted_item.current_state, persisted_item.version) == ("approved_for_action", version)
+
+
+def test_legacy_v2_completed_work_item_task_can_complete_without_rewriting_history(client, engine):
+    result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
+    review = client.get(f"/work-item-reviews/{result['review_id']}").json()
+    client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "approve", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "legacy-reviewer",
+        "reviewed_data": review["work_item_data"], "action_plan_id": result["action_plan_id"],
+    })
+    task = client.get("/internal-tasks?status=open").json()[0]
+    with Session(engine) as session:
+        legacy = WorkflowDefinition(
+            name="generic_document_review", version=2, description="Legacy workflow",
+            states=[{"name": "needs_review", "terminal": False, "review_required": True}, {"name": "approved_for_action", "terminal": False, "review_required": False}, {"name": "completed", "terminal": True, "review_required": False}],
+            initial_state="needs_review",
+            transitions=[{"from_state": "needs_review", "to_state": "approved_for_action", "review_decision": "approve"}, {"from_state": "approved_for_action", "to_state": "completed", "review_decision": None}],
+        )
+        session.add(legacy); session.flush()
+        item = session.get(WorkItem, uuid.UUID(review["work_item_id"]))
+        item.workflow_definition_id = legacy.id
+        item.current_state = "completed"
+        session.commit()
+        before = session.scalar(select(func.count(WorkItemTransition.id)).where(WorkItemTransition.work_item_id == item.id))
+        version = item.version
+    response = client.post(
+        f"/internal-tasks/{task['id']}/complete",
+        json={"completed_by": "legacy-worker", "completion_note": "Legacy task finished"},
+    )
+    assert response.status_code == 200
+    assert response.json()["completed_by"] == "legacy-worker"
+    with Session(engine) as session:
+        item = session.get(WorkItem, uuid.UUID(review["work_item_id"]))
+        after = session.scalar(select(func.count(WorkItemTransition.id)).where(WorkItemTransition.work_item_id == item.id))
+        assert (item.current_state, item.version, after) == ("completed", version, before)
 
 
 def test_correction_revises_plan_and_manual_path_executes_nothing(client, engine):
@@ -242,6 +348,35 @@ def test_correction_revises_plan_and_manual_path_executes_nothing(client, engine
     assert client.get("/internal-tasks").json() == []
     with Session(engine) as session:
         assert session.scalar(select(func.count(ActionPlan.id))) == 2
+
+
+def test_failed_task_creation_moves_work_item_to_action_attention_without_task(client, engine, monkeypatch):
+    result = client.post(f"/document-extractions/{extraction(engine)}/process", json={}).json()
+    review = client.get(f"/work-item-reviews/{result['review_id']}").json()
+
+    def failed_execution(session, plan):
+        now = datetime.now(timezone.utc)
+        execution = ActionExecution(
+            action_plan_id=plan.id,
+            idempotency_key=f"action-plan:{plan.id}",
+            status="failed",
+            result={},
+            error_message="Deterministic task creation failure",
+            completed_at=now,
+        )
+        session.add(execution)
+        session.flush()
+        return execution
+
+    monkeypatch.setattr("app.work_item_reviews.execute_internal_task", failed_execution)
+    response = client.post(f"/work-item-reviews/{review['id']}/resolve", json={
+        "decision": "approve", "expected_work_item_state": review["state"],
+        "expected_work_item_version": review["work_item_version"], "reviewer": "reviewer",
+        "reviewed_data": review["work_item_data"], "action_plan_id": result["action_plan_id"],
+    })
+    assert response.status_code == 201
+    assert response.json()["current_state"] == "action_needs_attention"
+    assert client.get("/internal-tasks").json() == []
 
 
 def test_pipeline_errors_and_provider_failure_persist_nothing(client, engine):

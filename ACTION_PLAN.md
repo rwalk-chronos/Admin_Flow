@@ -455,8 +455,21 @@ action execution
    ┌──────────────┴──────────────┐
  success                       failure
    ↓                              ↓
-completed                 action_needs_attention
+awaiting_task_completion   action_needs_attention
+   ↓
+internal task completed
+   ↓
+completed
 ```
+
+Action execution success and business-work completion are separate facts. For
+`create_internal_task`, a successful Action Execution means the authorized task
+was created and handed to its deterministic queue and responsible role. The
+originating WorkItem remains open until a human explicitly completes that task.
+
+The V1 handoff model is Queue + Responsible Role. A future named assignee may be
+added separately; task creation does not falsely imply that a particular person
+was assigned.
 
 Manual handling should be a separate deterministic path, for example:
 
@@ -473,6 +486,7 @@ The exact state names can be decided during implementation design, but the seman
 - review decision
 - authorization
 - action attempt
+- follow-up task completion
 - action result
 
 are separate facts.

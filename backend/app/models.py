@@ -450,5 +450,8 @@ class InternalTask(Base):
     source_artifact_ids: Mapped[list[str]] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open", server_default="open")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_by: Mapped[str | None] = mapped_column(String(255))
+    completion_note: Mapped[str | None] = mapped_column(Text)
     action_execution: Mapped[ActionExecution] = relationship(back_populates="internal_task")
     work_item: Mapped[WorkItem] = relationship(back_populates="internal_tasks")

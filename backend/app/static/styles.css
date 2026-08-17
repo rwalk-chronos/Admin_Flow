@@ -141,6 +141,16 @@ input:disabled, select:disabled, textarea:disabled { color: #788590; background:
 .detail-item dt { margin-bottom: 3px; color: var(--muted); font-size: .77rem; font-weight: 680; text-transform: uppercase; letter-spacing: .04em; }
 .detail-item dd { margin: 0; overflow-wrap: anywhere; }
 .section-stack { display: grid; gap: 20px; }
+.task-list { display: grid; gap: 14px; }
+.task-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 20px; padding: 20px; }
+.task-card h2 { margin: 0 0 5px; font-size: 1.08rem; }
+.task-card .badge { margin-top: 10px; }
+.cognitive-task { max-width: 920px; }
+.cognitive-task .packet-section { padding: 24px; }
+.task-overview { border-left: 4px solid var(--blue); }
+.completion-card { border-left: 4px solid var(--green); }
+.source-actions { justify-content: flex-start; }
+.handoff-details { margin: 14px 0; }
 pre.data-view { margin: 0; padding: 16px; overflow: auto; border-radius: 7px; color: #dceaf2; background: #173042; font: .84rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
 .timeline { margin: 0; padding: 0 0 0 21px; list-style: none; border-left: 2px solid var(--line); }
 .timeline li { position: relative; padding: 0 0 20px 17px; }
@@ -168,7 +178,7 @@ pre.data-view { margin: 0; padding: 16px; overflow: auto; border-radius: 7px; co
   .summary-grid { gap: 10px; }
   .summary-card { padding: 16px; }
   .dashboard-grid, .filter-bar, .detail-grid { grid-template-columns: 1fr; }
-  .review-card { grid-template-columns: 1fr; }
+  .review-card, .task-card { grid-template-columns: 1fr; }
   .review-card .button { width: 100%; }
   .fact-row, .decision-fields { grid-template-columns: 1fr; gap: 3px; }
   .decision-actions .button { width: 100%; }

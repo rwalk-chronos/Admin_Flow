@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import DocumentExtractionStatus, IntakeEventStatus
 
@@ -361,6 +361,31 @@ class InternalTaskResponse(BaseModel):
     source_artifact_ids: list[str]
     status: Literal["open", "completed"]
     created_at: datetime
+    completed_at: datetime | None
+    completed_by: str | None
+    completion_note: str | None
+
+
+class InternalTaskComplete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    completed_by: str = Field(min_length=1, max_length=255)
+    completion_note: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("completed_by")
+    @classmethod
+    def validate_completed_by(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("completed_by must not be blank")
+        return value
+
+    @field_validator("completion_note")
+    @classmethod
+    def validate_completion_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 class DecisionPacketFact(BaseModel):
@@ -404,6 +429,10 @@ class DecisionPacketActionResult(BaseModel):
     queue: str | None = None
     owner_role: str | None = None
     task_created_at: datetime | None = None
+    task_status: Literal["open", "completed"] | None = None
+    task_completed_at: datetime | None = None
+    task_completed_by: str | None = None
+    task_completion_note: str | None = None
 
 
 class DecisionPacketResponse(BaseModel):

@@ -168,13 +168,24 @@ def build_decision_packet(session: Session, item: WorkItem, review: WorkItemRevi
             "queue": task.queue.replace("_", " ").title() if task else None,
             "owner_role": task.owner_role.replace("_", " ").title() if task and task.owner_role else None,
             "task_created_at": task.created_at if task else None,
+            "task_status": task.status if task else None,
+            "task_completed_at": task.completed_at if task else None,
+            "task_completed_by": task.completed_by if task else None,
+            "task_completion_note": task.completion_note if task else None,
         }
-    status_labels = {"completed": "Completed", "manual_handling": "Manual handling", "action_needs_attention": "Action needs attention"}
+    status_labels = {
+        "needs_review": "Ready for review",
+        "approved_for_action": "Approved — creating task",
+        "awaiting_task_completion": "Awaiting task completion",
+        "completed": "Completed",
+        "manual_handling": "Handled manually",
+        "action_needs_attention": "Action needs attention",
+    }
     return {
         "review": {"id": review.id, "status": review.status, "reviewer": review.reviewer, "notes": review.notes, "created_at": review.created_at, "resolved_at": review.resolved_at} if review else None,
         "work_item_id": item.id,
         "title": item.title,
-        "status_label": status_labels.get(item.current_state, "Needs your review"),
+        "status_label": status_labels.get(item.current_state, item.current_state.replace("_", " ").title()),
         "document_type": document_type,
         "confidence": confidence,
         "confidence_band": confidence_band(confidence) if confidence is not None else None,

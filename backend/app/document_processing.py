@@ -50,10 +50,10 @@ GENERIC_OFFICE = ProcessingProfile(
 )
 
 WORKFLOW_PAYLOAD = WorkflowDefinitionCreate.model_validate({
-    "name": "generic_document_review", "version": 2, "description": "Generic deterministic document review and internal task workflow",
-    "states": [{"name": "needs_review", "terminal": False, "review_required": True}, {"name": "approved_for_action", "terminal": False}, {"name": "completed", "terminal": True}, {"name": "action_needs_attention", "terminal": True}, {"name": "manual_handling", "terminal": True}],
+    "name": "generic_document_review", "version": 3, "description": "Generic deterministic document review, internal task handoff, and completion workflow",
+    "states": [{"name": "needs_review", "terminal": False, "review_required": True}, {"name": "approved_for_action", "terminal": False}, {"name": "awaiting_task_completion", "terminal": False}, {"name": "completed", "terminal": True}, {"name": "action_needs_attention", "terminal": True}, {"name": "manual_handling", "terminal": True}],
     "initial_state": "needs_review",
-    "transitions": [{"from_state": "needs_review", "to_state": "approved_for_action", "review_decision": "approve"}, {"from_state": "needs_review", "to_state": "manual_handling", "review_decision": "handle_manually"}, {"from_state": "approved_for_action", "to_state": "completed"}, {"from_state": "approved_for_action", "to_state": "action_needs_attention"}],
+    "transitions": [{"from_state": "needs_review", "to_state": "approved_for_action", "review_decision": "approve"}, {"from_state": "needs_review", "to_state": "manual_handling", "review_decision": "handle_manually"}, {"from_state": "approved_for_action", "to_state": "awaiting_task_completion"}, {"from_state": "approved_for_action", "to_state": "action_needs_attention"}, {"from_state": "awaiting_task_completion", "to_state": "completed"}],
 })
 
 
